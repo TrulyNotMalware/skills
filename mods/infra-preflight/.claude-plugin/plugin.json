@@ -1,0 +1,16 @@
+{
+  "name": "infra-preflight",
+  "version": "0.1.0",
+  "description": "Before `docker compose up|start|restart` on a ~/infra service, checks that Tailscale is Running and that the service's BIND_IP matches the Tailscale IPv4; otherwise refuses the command with the fix.",
+  "author": {
+    "name": "junho"
+  },
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enabled",
+      "description": "Check Tailscale is Running and BIND_IP matches before `docker compose up|start|restart` on ~/infra services. Off: no check.",
+      "default": true
+    }
+  }
+}

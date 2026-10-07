@@ -1,0 +1,17 @@
+{
+  "name": "infra-pane",
+  "version": "0.1.0",
+  "description": "Live view of the local infra testbed (~/infra): which compose services are up, the OrbStack k8s cluster and its namespaces' pods, Tailscale state, wiki-serve, with stop buttons and wiki-serve / k8s toggles; a status line while anything runs; /infra opens it.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "junho"
+  },
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enabled",
+      "description": "Poll ~/infra every 20 s, show the pane and the status line. Off: no polling, pane closed, /infra answers that it is off.",
+      "default": true
+    }
+  }
+}

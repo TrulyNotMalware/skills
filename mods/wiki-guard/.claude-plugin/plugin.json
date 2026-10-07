@@ -1,0 +1,17 @@
+{
+  "name": "wiki-guard",
+  "version": "0.1.0",
+  "description": "Enforces the personal wiki's edit rules at tool-call time: raw/ is immutable, log.md is append-only, public pages never wikilink local-only pages, and git commit waits for bin/wikilint.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "junho"
+  },
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enabled",
+      "description": "Refuse wiki edits that break its rules (raw/ immutable, log.md append-only, no local-only wikilinks in committed pages, lint before commit). Off: every call passes through.",
+      "default": true
+    }
+  }
+}
