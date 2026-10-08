@@ -291,15 +291,17 @@ if another transaction has changed the row. Where current data matters, use
 - `update()` and `delete()` statements synchronize loaded objects by default. With
   `execution_options(synchronize_session=False)` the loaded objects keep their old values, also
   after commit, until they are refreshed. Neither form runs ORM relationship cascades:
-  `delete(Parent)` with children and no `ON DELETE CASCADE` in the database fails with a foreign
-  key violation, while `session.delete(parent)` removes the children. With `ON DELETE CASCADE`
+  `delete(Parent)` fails when remaining children reference it through an enforced foreign key with
+  no database delete action. `await session.delete(parent)` removes children when the relationship
+  has `delete` cascade configured. Without it, the default behavior sets their foreign keys to
+  `NULL` (and fails if those columns are non-nullable). With `ON DELETE CASCADE`
   the rows are deleted, but children already loaded in the session stay readable and
   `session.get()` keeps returning them.
 
 ## Gotchas
 
 - Agent flushes and returns without `commit()` - the session closes with a rollback; the client gets `201` and nothing is stored.
-- Agent commits in the dependency after `yield` - the response is already sent when the commit fails.
+- Agent commits in a default request-scoped dependency after `yield` - the response is already sent when the commit fails; commit before returning or use `scope="function"`.
 - Agent wraps writes in `async with session.begin():` inside a handler - fails as soon as any dependency has used the session.
 - Agent returns an updated entity whose `onupdate` is a SQL expression, without `refresh()` or `eager_defaults` - `500` after a successful commit.
 - Agent leaves `expire_on_commit` at its default - any attribute access after commit raises `MissingGreenlet`.
@@ -335,4 +337,5 @@ if another transaction has changed the row. Where current data matters, use
 - [SQLAlchemy: Asynchronous I/O (asyncio)](https://docs.sqlalchemy.org/en/21/orm/extensions/asyncio.html)
 - [SQLAlchemy: Session basics](https://docs.sqlalchemy.org/en/21/orm/session_basics.html)
 - [SQLAlchemy: Relationship loading techniques](https://docs.sqlalchemy.org/en/21/orm/queryguide/relationships.html)
+- [SQLAlchemy: Delete cascade](https://docs.sqlalchemy.org/en/21/orm/cascades.html#delete)
 - [SQLAlchemy: Mutation tracking](https://docs.sqlalchemy.org/en/21/orm/extensions/mutable.html)

@@ -27,8 +27,9 @@ Before changing any version, find its authority:
 - Remove an explicit version before adding one. If the BOM manages a library, a hard-coded version
   in a module can change the tested combination; whether it wins depends on the mechanism below.
 - Align library **families**, not single artifacts (all of Jackson, all of Netty, Kotlin stdlib +
-  reflect + coroutines). Mixed family versions compile and then fail at runtime with
-  `NoSuchMethodError`/`NoClassDefFoundError`.
+  reflect, and the kotlinx-coroutines modules). Coroutines has its own version numbering: choose a
+  release compatible with Kotlin, not the compiler's version number. Mixed family versions compile
+  and then fail at runtime with `NoSuchMethodError`/`NoClassDefFoundError`.
 
 ## Importing the Spring Boot BOM
 
@@ -52,7 +53,8 @@ Two mechanisms, with different override rules. Check which one the build uses.
   compiler. With a plain `platform`, the plugin-added stdlib (the higher version) wins resolution.
   Either way, confirm the effective alignment rather than assuming it:
   `./gradlew :app:dependencyInsight --dependency kotlin-stdlib --configuration runtimeClasspath`
-  (stdlib, `kotlin-reflect`, and coroutines should match the compiler you build with).
+  (stdlib and `kotlin-reflect` should match the compiler you build with; check coroutines separately
+  against its own BOM and Kotlin compatibility).
 - **Every module that uses Spring needs the BOM**, including test-only and library modules. A module
   without it resolves whatever versions transitive dependencies ask for. That module's classpath can
   then carry an old Spring (for example `spring-core` 5.3.31 from an old `spring-data-commons`) while

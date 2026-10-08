@@ -201,9 +201,10 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   sent with its invalid values and status `200`. Dicts and ORM objects are validated.
 - Filtering and validation are skipped when the handler returns a `Response` object
   (`JSONResponse(...)`) or when the route sets `response_model=None`, whatever the return
-  annotation says. Headers, cookies and the status code set on an injected `response: Response`
-  parameter (in the handler or in a dependency) are dropped as well; set them on the object that
-  is returned.
+  annotation says. With `response_model=None` and an ordinary return value (such as a dict),
+  headers, cookies and the status code set on an injected `response: Response` are still applied.
+  When returning a separate `Response` object, set those values on that object instead; values on
+  the injected response (in the handler or in a dependency) are not copied to it.
 - Returned data that does not validate against the response model is a `500`
   (`ResponseValidationError`), not a `422`. It is a server bug, and unit tests that call the
   handler function directly never see it.
@@ -292,8 +293,8 @@ define models and dependency aliases at module level.
 
 ## Gotchas
 
-- Agent commits in a session dependency after `yield` - the response is already sent; a failed commit is logged and the client keeps its `200`. Commit before returning, or use `scope="function"`.
-- Agent concludes from a test that a failure after `yield` is reported - the test client re-raised it; a real client received `200`.
+- Agent commits in a default request-scoped session dependency after `yield` - the response is already sent; a failed commit is logged and the client keeps its `200`. Commit before returning, or use `scope="function"`.
+- Agent concludes from a test that a failure after `yield` in a default request-scoped dependency is reported - the test client re-raised it; a real client received `200`.
 - Agent raises `HTTPException` after `yield` in a default-scope dependency - it never reaches the client.
 - Agent catches an exception in a `yield` dependency and does not re-raise - every failure becomes a `500`, including intended 4xx responses.
 - Agent adds a `lifespan` to an app that still has `@app.on_event` handlers - those silently stop running, while `@router.on_event` handlers keep running.

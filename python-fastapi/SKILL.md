@@ -17,11 +17,11 @@ description: >
 # Python + FastAPI
 
 FastAPI code fails quietly more often than loudly. The framework accepts almost any function
-signature, runs sync and async code side by side, and sends the response before dependency cleanup
-runs. Most agent mistakes come from code that imports, starts, and passes direct-call unit tests,
-but behaves differently once a real request goes through the ASGI stack, or once the process runs
-under a real server with more than one worker. This skill lists those cases. Read the matching
-reference file before editing that area.
+signature, runs sync and async code side by side, and sends the response before default request-scoped
+dependency cleanup runs. Most agent mistakes come from code that imports, starts, and passes
+direct-call unit tests, but behaves differently once a real request goes through the ASGI stack,
+or once the process runs under a real server with more than one worker. This skill lists those
+cases. Read the matching reference file before editing that area.
 
 ## Target versions
 
@@ -78,7 +78,8 @@ symptom disappear.
   No `@app.on_event`, nothing loop-bound at import time.
 - `async def` handlers call only awaitable I/O. Blocking calls go to a `def` handler or the
   threadpool; CPU-bound work goes to another process.
-- Commit before the handler returns. Code after `yield` in a dependency is cleanup only.
+- Finish the commit before sending a success response: in the handler/service, or in a
+  `scope="function"` dependency's exit code. Default request-scoped exit code is cleanup only.
 - Separate request and response models. Every handler declares its response type; ORM objects are
   never the response model.
 - Read configuration through a dependency, not from a module-level object.
@@ -111,8 +112,9 @@ symptom disappear.
 These are the failures that start fine and pass direct-call unit tests. Each reference file has its
 own, longer list.
 
-- Agent commits after `yield` in a session dependency - the response is sent first, so a failed
-  commit still returns `200`. See [fastapi-basics](reference/fastapi-basics.md#dependencies-with-yield).
+- Agent commits after `yield` in a default request-scoped session dependency - the response is sent
+  first, so a failed commit still returns `200`.
+  See [fastapi-basics](reference/fastapi-basics.md#dependencies-with-yield).
 - Agent adds `lifespan` next to existing `@app.on_event` handlers - those handlers silently stop
   running.
 - Agent calls blocking code (`requests`, `time.sleep`, sync drivers, password hashing) in an

@@ -115,8 +115,11 @@ class OrderRepositoryTest
     })
 ```
 
-Put fixtures in the leaf when the test transaction's rollback should clean them up. Anything written in
-a container block (or through `TransactionTemplate`) is committed and needs explicit cleanup.
+Put fixtures in the leaf when the test transaction's rollback should clean them up. In `Test` mode,
+container blocks run outside that transaction, so writes committed there need explicit cleanup.
+`TransactionTemplate` defaults to `REQUIRED`: on the same thread, with the same transaction manager,
+it joins an existing test transaction and rolls back with it. It commits independently only when it
+starts a transaction of its own (for example in the container block above, or with `REQUIRES_NEW`).
 
 - Register Spring with `@ApplyExtension(extensions = [SpringExtension::class])` on the spec
   (`io.kotest.extensions.spring.SpringExtension`), or once in the project config. The no-arg form

@@ -66,9 +66,10 @@ def test_bump() -> None:
 
 Why it matters beyond documentation:
 
-- **mypy without `strict` skips the body of a function that has no annotations at all.**
-  `def total(): return 1 + "a"` is not reported. One annotation on the function switches the
-  check on. `strict` checks those bodies too.
+- **By default, mypy skips the body of a function that has no annotations at all.**
+  `def total(): return 1 + "a"` is not reported. One signature annotation switches the check on.
+  `check_untyped_defs` checks unannotated bodies too; `strict` includes that option, but is not
+  required to enable it. Unannotated parameters still have type `Any`.
 - An unannotated parameter is `Any`, and nothing done with it is ever reported, also under
   `strict`: `def f(x): return x.no_such_attribute + 1` passes apart from the missing-annotation
   error itself.
@@ -268,7 +269,7 @@ def open_mode(mode: Literal["r", "w"]) -> str:
 
 ## Gotchas
 
-- Agent leaves a helper or a test without annotations because the types are "obvious" - without `strict` mypy does not check that body at all.
+- Agent leaves a helper or a test completely unannotated because the types are "obvious" - mypy skips its body unless `check_untyped_defs` is enabled directly or through `strict`.
 - Agent annotates an async generator as `AsyncIterator[T]` and a caller wraps it in `contextlib.aclosing` or binds it to an `AsyncGenerator` protocol - mypy `type-var`/protocol mismatch; write `AsyncGenerator[T, None]` when `aclose()` is part of the contract.
 - Agent omits `-> None` on an `__init__` that has annotated parameters - mypy `strict` accepts it, the rule of this skill does not; ruff `ANN204` reports it.
 - Agent types a decorator as `Callable[..., R]` - calls of every decorated function lose their argument checks; use `Callable[P, R]`.
