@@ -129,6 +129,11 @@ Consequences:
   returns, before the response is sent. A failure there becomes a `500`, and an `HTTPException`
   raised there is returned to the client. The resource is then already closed while the response is
   streamed and while background tasks run.
+- A default-scope dependency with `yield` cannot depend on a `scope="function"` one: the route
+  definition raises `DependencyScopeError` (FastAPI 0.142). A plain dependency without `yield` (a
+  repository factory) can, and the check does not look through it: a request-scoped `yield`
+  dependency that reaches the function-scoped session that way starts fine, and its exit code runs
+  after the session is already closed.
 - With the default scope the resource is still open during background tasks and while a
   `StreamingResponse` body is generated. A long stream therefore holds its database connection for
   the whole stream.
@@ -204,7 +209,8 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   annotation says. With `response_model=None` and an ordinary return value (such as a dict),
   headers, cookies and the status code set on an injected `response: Response` are still applied.
   When returning a separate `Response` object, set those values on that object instead; values on
-  the injected response (in the handler or in a dependency) are not copied to it.
+  the injected response (in the handler or in a dependency) are not copied to it. Values a `yield`
+  dependency sets after its `yield` never reach the client, also with `scope="function"`.
 - Returned data that does not validate against the response model is a `500`
   (`ResponseValidationError`), not a `422`. It is a server bug, and unit tests that call the
   handler function directly never see it.

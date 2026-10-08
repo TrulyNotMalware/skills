@@ -290,13 +290,26 @@ if another transaction has changed the row. Where current data matters, use
   snapshot, so the two queries of a `selectinload` can see different states.
 - `update()` and `delete()` statements synchronize loaded objects by default. With
   `execution_options(synchronize_session=False)` the loaded objects keep their old values, also
-  after commit, until they are refreshed. Neither form runs ORM relationship cascades:
-  `delete(Parent)` fails when remaining children reference it through an enforced foreign key with
-  no database delete action. `await session.delete(parent)` removes children when the relationship
-  has `delete` cascade configured. Without it, the default behavior sets their foreign keys to
-  `NULL` (and fails if those columns are non-nullable). With `ON DELETE CASCADE`
-  the rows are deleted, but children already loaded in the session stay readable and
-  `session.get()` keeps returning them.
+  after commit, until they are refreshed.
+- Deleting a parent that has children (SQLAlchemy 2.1, same on PostgreSQL 17 and on SQLite with
+  foreign keys enforced):
+  - `delete(Parent)` runs no ORM relationship cascade. With an enforced foreign key and no database
+    delete action it fails with a foreign key violation. With `ON DELETE CASCADE` the rows are
+    deleted, but children already loaded in the session stay readable and `session.get()` keeps
+    returning them.
+  - `await session.delete(parent)` acts through the parent's one-to-many relationship and loads
+    unloaded children itself, also with `lazy="raise"` (during the `delete()` call with a `delete`
+    cascade, at flush with the default cascade). With a `delete` cascade
+    (`cascade="all, delete-orphan"`) it deletes them. With the default cascade it sets their
+    foreign keys to `NULL`, an `IntegrityError` at flush if the column is `NOT NULL`. When only the
+    child's many-to-one is mapped, it deletes the parent alone and the foreign key fails.
+  - `ON DELETE CASCADE` in the database does not change this by itself. With the default cascade
+    the ORM sets the children's foreign keys to `NULL` before deleting the parent, so the database
+    cascade has nothing to delete: nullable children survive as orphans and nothing fails.
+    `passive_deletes=True` prevents that only for children not loaded in the session; loaded
+    children are still set to `NULL`. To delete the children, use
+    `cascade="all, delete-orphan", passive_deletes=True`: the database deletes unloaded children
+    and the ORM deletes loaded ones.
 
 ## Gotchas
 
@@ -315,6 +328,7 @@ if another transaction has changed the row. Where current data matters, use
 - Agent calls `refresh()` on an object with unflushed changes - the changes are discarded.
 - Agent calls a plain `refresh(obj)` on an object whose children were assigned in the constructor - the relationship is expired; refresh named columns only.
 - Agent bulk-deletes parents with `delete()` and relies on the ORM cascade - foreign key violation, or stale children left in the session.
+- Agent adds `ON DELETE CASCADE` to the foreign key and leaves the relationship at the default cascade - `session.delete(parent)` nulls the children's foreign keys first and they survive as orphans (loaded ones even with `passive_deletes=True`); use `cascade="all, delete-orphan", passive_deletes=True`.
 - Agent sets `pool_timeout` to bound slow queries - it only bounds waiting for a connection.
 - Agent continues with a session after `IntegrityError` without rollback - `PendingRollbackError` or "current transaction is aborted"; use `begin_nested()`.
 - Agent reads an unloaded many-to-one that works in one code path - the target was in the identity map; another path raises `MissingGreenlet`.

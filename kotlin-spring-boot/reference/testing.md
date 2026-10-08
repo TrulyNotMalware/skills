@@ -118,8 +118,11 @@ class OrderRepositoryTest
 Put fixtures in the leaf when the test transaction's rollback should clean them up. In `Test` mode,
 container blocks run outside that transaction, so writes committed there need explicit cleanup.
 `TransactionTemplate` defaults to `REQUIRED`: on the same thread, with the same transaction manager,
-it joins an existing test transaction and rolls back with it. It commits independently only when it
-starts a transaction of its own (for example in the container block above, or with `REQUIRES_NEW`).
+it joins an existing test transaction and rolls back with it. It commits independently when it
+starts a transaction of its own: in the container block above, with `REQUIRES_NEW`, or when the leaf
+code runs on another thread. Kotest's default dispatch keeps a leaf on the test thread across
+`delay`, but `withContext(Dispatchers.IO) { ... }` leaves it, and a spec with `blockingTest = true`
+runs the whole leaf elsewhere, so even a plain repository `save` there commits (Kotest 6.2).
 
 - Register Spring with `@ApplyExtension(extensions = [SpringExtension::class])` on the spec
   (`io.kotest.extensions.spring.SpringExtension`), or once in the project config. The no-arg form
@@ -427,6 +430,7 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
 - Agent asserts `application/problem+json` without problem details enabled - Boot's default is off.
 - Agent defines a top-level `@TestConfiguration` and never `@Import`s it - it is not picked up.
 - Agent writes fixtures in a Kotest container block and expects rollback - they are committed.
+- Agent sets `blockingTest = true` on a Spring spec, or wraps leaf writes in `withContext(Dispatchers.IO)` - the code leaves the test thread and its writes commit.
 - Agent uses `unmockkAll()` in a parallel suite - it removes other tests' global mocks.
 - Agent writes a JUnit `@Test fun x() = runBlocking { ... }` - non-`Unit` return, the test is silently skipped.
 - Agent uses `Thread.sleep` for async assertions - use `eventually` or Awaitility.

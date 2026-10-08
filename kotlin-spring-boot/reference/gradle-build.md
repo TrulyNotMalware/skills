@@ -133,7 +133,8 @@ kotlin {
 - The Kotlin Gradle plugin version, the Kotlin stdlib version, and Boot's managed Kotlin version must
   agree. If the build pins the plugin to a newer Kotlin than Boot manages, make sure the stdlib and
   `kotlin-reflect` follow the plugin (they do by default when declared as `kotlin("reflect")`
-  without a version).
+  without a version). A `kotlin-reflect` that arrives only transitively stays at the BOM's version
+  under a plain `platform` (2.3.21 with Boot 4.1.1 and Kotlin 2.4.10), without a warning.
 - Annotation processing: `spring-boot-configuration-processor` (IDE metadata for
   `@ConfigurationProperties`) needs **kapt** in Kotlin; it has no KSP processor. kapt is in
   maintenance mode and slows builds. Add it only if the project wants the metadata.

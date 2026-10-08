@@ -69,7 +69,7 @@ Why it matters beyond documentation:
 - **By default, mypy skips the body of a function that has no annotations at all.**
   `def total(): return 1 + "a"` is not reported. One signature annotation switches the check on.
   `check_untyped_defs` checks unannotated bodies too; `strict` includes that option, but is not
-  required to enable it. Unannotated parameters still have type `Any`.
+  required to enable it.
 - An unannotated parameter is `Any`, and nothing done with it is ever reported, also under
   `strict`: `def f(x): return x.no_such_attribute + 1` passes apart from the missing-annotation
   error itself.
