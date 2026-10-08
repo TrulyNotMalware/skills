@@ -64,7 +64,8 @@ select = ["E", "F", "I", "B", "UP", "SIM", "ANN", "ASYNC", "FAST", "RUF006", "T2
 - `RUF006` flags `asyncio.create_task(...)` whose result is discarded
   ([asyncio-concurrency](asyncio-concurrency.md#tasks-and-ownership)).
 - ruff does not know about per-request `httpx.AsyncClient()`, sessions shared across tasks,
-  commits after `yield`, or missing `Query()` on list parameters. Those need review or tests.
+  commits after `yield` in default request-scoped dependencies, or missing `Query()` on list
+  parameters. Those need review or tests.
 
 ## Type checking with mypy
 

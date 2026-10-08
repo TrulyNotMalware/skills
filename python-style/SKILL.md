@@ -82,8 +82,9 @@ interpreter that actually runs the code.
 These run, pass a quick manual check, and are wrong. Each reference file has a longer list and
 says which tool, if any, reports the problem.
 
-- Agent leaves a helper, a test or `__init__` without annotations - mypy without `strict` does
-  not check that function's body at all. See [typing](reference/typing.md#annotate-everything).
+- Agent leaves a helper, a test or `__init__` completely unannotated - mypy skips its body by
+  default; `check_untyped_defs` (also enabled by `strict`) checks it.
+  See [typing](reference/typing.md#annotate-everything).
 - Agent writes `limit = limit or 100` - a caller's `0` silently becomes `100`.
 - Agent writes `def f(items: list[str] = [])` - every call shares one list.
 - Agent annotates a value as `Any` to make an error go away - all later checks on it are off.
