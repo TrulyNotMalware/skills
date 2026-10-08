@@ -57,6 +57,13 @@ export type InfraK8s = {
   namespaces: InfraK8sNamespace[]
 }
 
+/**
+ * What the wiki read-only web serves: `off` (nothing listens), `public` (`wiki-serve on`: the areas git ignores are hidden),
+ * `full` (`wiki-serve on --full`: everything, to every tailnet device), `unknown` (listening without the launchd agent,
+ * e.g. started by hand with `wiki-serve run`).
+ */
+export type InfraWikiMode = 'off' | 'public' | 'full' | 'unknown'
+
 export type InfraSnapshot = {
   /** When this snapshot was taken, ms since the epoch. */
   at: number
@@ -68,6 +75,8 @@ export type InfraSnapshot = {
   tailscale: InfraTailscale
   /** Whether something listens on 127.0.0.1:8480 (the wiki read-only web). */
   wikiServe: boolean
+  /** Read from the launchd agent `scripts/wiki-serve on` writes: it carries WIKI_FULL only for `--full`. */
+  wikiMode: InfraWikiMode
   k8s: InfraK8s
 }
 

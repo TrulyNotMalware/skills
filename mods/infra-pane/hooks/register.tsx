@@ -1,12 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { InfraK8s, InfraK8sNamespace, InfraK8sPod, InfraK8sPodKind, InfraOther, InfraService, InfraSnapshot, InfraTailscale } from '../types'
+import type { InfraK8s, InfraK8sNamespace, InfraK8sPod, InfraK8sPodKind, InfraOther, InfraService, InfraSnapshot, InfraTailscale, InfraWikiMode } from '../types'
 
 const PANE = 'infra'
 const POLL_MS = 20_000
 const TAILSCALE = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
 const WIKI_SERVE_PORT = 8480
+// the launchd agent `scripts/wiki-serve on [--full]` writes; WIKI_FULL is in it only for --full
+const WIKI_SERVE_PLIST = 'Library/LaunchAgents/com.junho.wiki-serve.plist'
 const snapshot = atom({ plugin: 'infra-pane', key: 'snapshot' } as const, null)
 const expanded = atom({ plugin: 'infra-pane', key: 'expanded' } as const, [])
 
@@ -75,6 +77,23 @@ function parseTailscale(stdout: string): InfraTailscale {
     return { state: 'unknown' }
   }
 }
+
+/**
+ * Which half of the wiki the read-only web serves (owner decision 2026-10-08): `wiki-serve on` hides what git ignores
+ * (the local-only areas), `on --full` serves everything to every tailnet device, the mac mini's other Claude account too.
+ */
+async function wikiMode($: Engine, listening: boolean): Promise<InfraWikiMode> {
+  if (!listening) return 'off'
+  homeDir ??= (await $.env.get('HOME')) ?? '/'
+  try {
+    const plist = await $.fs.read(`${homeDir}/${WIKI_SERVE_PLIST}`)
+    return typeof plist === 'string' && plist.includes('<key>WIKI_FULL</key>') ? 'full' : 'public'
+  } catch {
+    return 'unknown' // listening without the agent: started by hand (`wiki-serve run`), its environment unknown here
+  }
+}
+
+const WIKI_LABEL: Record<InfraWikiMode, string> = { off: 'off', public: 'ON public', full: 'ON FULL', unknown: 'ON (mode?)' }
 
 // The OrbStack cluster: only ever addressed by its own kube context, never the current one (which may be a remote cluster).
 const KUBE = ['kubectl', '--context', 'orbstack'] as const
@@ -151,6 +170,7 @@ async function collect($: Engine): Promise<InfraSnapshot> {
     }
   })
   const others: InfraOther[] = projects.filter(p => !p.dir.startsWith(`${infra}/`))
+  const mode = await wikiMode($, serve.exitCode === 0)
   return {
     at,
     docker: compose.exitCode === 0 ? 'ok' : 'down',
@@ -159,6 +179,7 @@ async function collect($: Engine): Promise<InfraSnapshot> {
     others,
     tailscale: tailscale.exitCode === 0 ? parseTailscale(tailscale.stdout) : { state: 'unknown' },
     wikiServe: serve.exitCode === 0,
+    wikiMode: mode,
     k8s,
   }
 }
@@ -167,7 +188,7 @@ function statusLine(snap: InfraSnapshot): string | undefined {
   const up = snap.infra.filter(s => s.running).map(s => s.svc)
   const parts: string[] = []
   if (up.length > 0) parts.push(`infra ↑ ${up.join(' ')}`)
-  if (snap.wikiServe) parts.push('wiki-serve ON')
+  if (snap.wikiServe) parts.push(snap.wikiMode === 'full' ? 'wiki-serve FULL' : snap.wikiMode === 'unknown' ? 'wiki-serve ON (mode?)' : 'wiki-serve ON')
   if (snap.k8s.enabled) {
     const pods = snap.k8s.namespaces.reduce((n, ns) => n + ns.running, 0)
     const errors = snap.k8s.namespaces.reduce((n, ns) => n + podsOf(ns, 'error').length, 0)
@@ -182,7 +203,8 @@ function summary(snap: InfraSnapshot): string {
   const docker = snap.docker === 'ok' ? '' : ' (docker not answering)'
   const k8sErrors = snap.k8s.namespaces.reduce((n, ns) => n + podsOf(ns, 'error').length, 0)
   const k8s = snap.k8s.enabled ? (snap.k8s.reachable ? `on${k8sErrors > 0 ? `, ${k8sErrors} error pod${k8sErrors > 1 ? 's' : ''}` : ''}` : 'on, API not answering') : 'off'
-  return `infra: ${up.length > 0 ? `up: ${up.join(', ')}` : 'all services off'}${docker}; tailscale ${snap.tailscale.state}; wiki-serve ${snap.wikiServe ? 'ON' : 'off'}; k8s ${k8s}.`
+  const wiki = { off: 'off', public: 'ON (public only)', full: 'ON (FULL: local-only areas visible to every tailnet device)', unknown: 'ON (mode unknown)' }[snap.wikiMode]
+  return `infra: ${up.length > 0 ? `up: ${up.join(', ')}` : 'all services off'}${docker}; tailscale ${snap.tailscale.state}; wiki-serve ${wiki}; k8s ${k8s}.`
 }
 
 let polling: Promise<InfraSnapshot | undefined> | undefined
@@ -213,16 +235,28 @@ async function stop($: Engine, svc: string): Promise<string> {
   return text
 }
 
-/** `~/infra/scripts/wiki-serve on|off`: the wiki's read-only web (launchd agent + tailscale serve), host process only. */
-async function wikiServe($: Engine, want: 'on' | 'off'): Promise<string> {
+type WikiWant = 'on' | 'full' | 'off'
+const WIKI_ARGS: Record<WikiWant, readonly string[]> = { on: ['on'], full: ['on', '--full'], off: ['off'] }
+const WIKI_DOING: Record<WikiWant, string> = { on: 'turning on (public only)', full: 'turning on FULL (local-only areas too)', off: 'turning off' }
+const WIKI_DONE: Record<WikiWant, string> = {
+  on: 'wiki-serve ON (public only)',
+  full: 'wiki-serve ON FULL: every tailnet device, the mac mini too, can read the local-only areas; switch back to public when done',
+  off: 'wiki-serve OFF',
+}
+
+/**
+ * `~/infra/scripts/wiki-serve on [--full] | off`: the wiki's read-only web (launchd agent + tailscale serve), host
+ * process only. `on` while on restarts it in the new mode.
+ */
+async function wikiServe($: Engine, want: WikiWant): Promise<string> {
   const infra = await infraDir($)
-  $.ui.toast(`wiki-serve: turning ${want}…`)
-  const ran = await run($, [`${infra}/scripts/wiki-serve`, want], 60_000, infra)
+  $.ui.toast(`wiki-serve: ${WIKI_DOING[want]}…`)
+  const ran = await run($, [`${infra}/scripts/wiki-serve`, ...WIKI_ARGS[want]], 60_000, infra)
   const said = (ran.exitCode === 0 ? ran.stdout : ran.stderr || ran.stdout).trim().split('\n').filter(Boolean)
   const text =
     ran.exitCode === 0
-      ? `wiki-serve ${want.toUpperCase()}: ${said[0] ?? ''}`
-      : `wiki-serve ${want} failed (exit ${ran.exitCode}): ${said[said.length - 1] ?? ''}`
+      ? `${WIKI_DONE[want]}: ${said[0] ?? ''}`
+      : `wiki-serve ${WIKI_ARGS[want].join(' ')} failed (exit ${ran.exitCode}): ${said[said.length - 1] ?? ''}`
   $.ui.toast(text)
   await poll($)
   return text
@@ -254,8 +288,10 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'infra',
-      description: enabled ? 'Local infra (~/infra): show the pane, `stop <svc|all>`, `wiki on|off`, `k8s start|stop`' : 'Local infra pane (off; enable in /config)',
-      argumentHint: '[stop <svc|all> | wiki on|off | k8s start|stop]',
+      description: enabled
+        ? 'Local infra (~/infra): show the pane, `stop <svc|all>`, `wiki on|full|off` (on = public only), `k8s start|stop`'
+        : 'Local infra pane (off; enable in /config)',
+      argumentHint: '[stop <svc|all> | wiki on|full|off | k8s start|stop]',
     })
     if (!enabled) {
       $.ui.status(undefined)
@@ -280,8 +316,10 @@ export const register: Register = (on, options) => {
       return { text: await k8s($, target) }
     }
     if (verb === 'wiki') {
-      if (target !== 'on' && target !== 'off') return { text: 'infra: say `/infra wiki on` or `/infra wiki off`.' }
-      return { text: await wikiServe($, target) }
+      const want = target === 'public' ? 'on' : target
+      if (want !== 'on' && want !== 'full' && want !== 'off')
+        return { text: 'infra: say `/infra wiki on` (public only), `/infra wiki full` (local-only areas too) or `/infra wiki off`.' }
+      return { text: await wikiServe($, want) }
     }
     if (verb === 'stop') {
       if (!target) return { text: 'infra: say which service, e.g. `/infra stop kafka` or `/infra stop all`.' }
@@ -317,7 +355,7 @@ export const register: Register = (on, options) => {
     const tailscaleOk = snap.tailscale.state === 'Running'
     return (
       <Box flexDirection="column">
-        {/* header: each signal in its own color, the toggle beside wiki-serve */}
+        {/* header: each signal in its own color */}
         <Box>
           <Text color={snap.docker === 'ok' ? 'success' : 'error'}>docker {snap.docker === 'ok' ? '✓' : '✗'}</Text>
           <Text dimColor> · </Text>
@@ -325,9 +363,16 @@ export const register: Register = (on, options) => {
             tailscale {snap.tailscale.state}
             {snap.tailscale.ip ? ` ${snap.tailscale.ip}` : ''}
           </Text>
-          <Text dimColor> · </Text>
-          <Text color={snap.wikiServe ? 'warning' : undefined} bold={snap.wikiServe} dimColor={!snap.wikiServe}>
-            wiki-serve {snap.wikiServe ? 'ON' : 'off'}{' '}
+        </Box>
+        {/* wiki-serve: on/off (w, on = public only) and the mode switch. The switch has no hotkey: FULL shows the
+            local-only areas to every tailnet device, the mac mini's other Claude account included. */}
+        <Box>
+          <Text
+            color={snap.wikiMode === 'full' ? 'error' : snap.wikiServe ? 'warning' : undefined}
+            bold={snap.wikiServe}
+            dimColor={!snap.wikiServe}
+          >
+            wiki-serve {WIKI_LABEL[snap.wikiMode]}{' '}
           </Text>
           <Button
             key="wiki-serve-toggle"
@@ -335,6 +380,14 @@ export const register: Register = (on, options) => {
             hotkey="w"
             plain
             onPress={() => void wikiServe($, snap.wikiServe ? 'off' : 'on')}
+          />
+          <Text dimColor> · </Text>
+          <Button
+            key="wiki-serve-mode"
+            label={snap.wikiMode === 'off' ? 'on full' : snap.wikiMode === 'public' ? '→ full' : '→ public'}
+            plain
+            dimColor={snap.wikiMode !== 'full'}
+            onPress={() => void wikiServe($, snap.wikiMode === 'full' || snap.wikiMode === 'unknown' ? 'on' : 'full')}
           />
         </Box>
         {snap.docker !== 'ok' && <Text color="error">{snap.dockerError || 'docker compose ls failed (OrbStack off?)'}</Text>}

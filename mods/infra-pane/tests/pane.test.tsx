@@ -4,6 +4,9 @@ import type { On } from 'claude-code'
 const HOME = '/Users/t'
 const INFRA = `${HOME}/infra`
 const TS = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
+const PLIST = `${HOME}/Library/LaunchAgents/com.junho.wiki-serve.plist`
+const plistFor = (full: boolean) =>
+  `<dict><key>EnvironmentVariables</key><dict><key>WIKI_PORT</key><string>8480</string>${full ? '<key>WIKI_FULL</key><string>1</string>' : ''}</dict></dict>`
 
 const COMPOSE = JSON.stringify([
   { Name: 'local-kafka', Status: 'running(3)', ConfigFiles: `${INFRA}/kafka/docker-compose.yml` },
@@ -13,10 +16,10 @@ const COMPOSE = JSON.stringify([
   { Name: 'news_tracker', Status: 'running(3)', ConfigFiles: `${HOME}/workspace/news_tracker/compose.yaml` },
 ])
 
-type World = { argv: string[]; statuses: string[]; toasts: string[]; commands: string[]; opened: string[]; closed: string[]; lsof: number; k8s: boolean }
+type World = { argv: string[]; statuses: string[]; toasts: string[]; commands: string[]; opened: string[]; closed: string[]; lsof: number; k8s: boolean; plist: string | null }
 
 function world(on: On): World {
-  const w: World = { argv: [], statuses: [], toasts: [], commands: [], opened: [], closed: [], lsof: 1, k8s: false }
+  const w: World = { argv: [], statuses: [], toasts: [], commands: [], opened: [], closed: [], lsof: 1, k8s: false, plist: null }
   mock.env(on, { HOME })
   mock.clock(on, { now: 1_700_000_000_000 })
   on('fs.list', ($, e) => ({
@@ -24,6 +27,10 @@ function world(on: On): World {
       ? ['kafka', 'postgresql', 'gateway', 'mongodb', 'scripts', '.git'].map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false }))
       : [],
   }))
+  on('fs.read', ($, e) => {
+    if (e.path === PLIST && w.plist !== null) return { value: w.plist }
+    throw new Error(`ENOENT: ${e.path}`)
+  })
   on('fs.exists', ($, e) => ({ value: [`${INFRA}/kafka/docker-compose.yml`, `${INFRA}/postgresql/docker-compose.yml`, `${INFRA}/gateway/docker-compose.yml`, `${INFRA}/mongodb/docker-compose.yml`].includes(e.path) }))
   on('process.run', ($, e) => {
     const key = e.argv.join(' ')
@@ -52,8 +59,16 @@ function world(on: On): World {
         ].join('\n') + '\n',
       )
     if (key.includes('scripts/wiki-serve')) {
-      w.lsof = key.endsWith(' on') ? 0 : 1 // the next lsof poll sees the new state
-      return ok(key.endsWith(' on') ? 'ON  — wiki-serve running (pid 1)\n  https://x.ts.net:8480 -> 127.0.0.1:8480\nturn off with: wiki-serve off' : 'OFF — server stopped, launchd agent removed')
+      // the next poll sees the new state: lsof for listening, the launchd agent for the mode
+      const full = key.endsWith(' on --full')
+      const turnedOn = full || key.endsWith(' on')
+      w.lsof = turnedOn ? 0 : 1
+      w.plist = turnedOn ? plistFor(full) : null
+      return ok(
+        turnedOn
+          ? `ON  — wiki-serve running (pid 1), ${full ? 'FULL (local-only areas served)' : 'public only'}\n  https://x.ts.net:8480 -> 127.0.0.1:8480\nturn off with: wiki-serve off`
+          : 'OFF — server stopped, launchd agent removed',
+      )
     }
     return ok('', 127)
   })
@@ -80,6 +95,8 @@ function world(on: On): World {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   return w
 }
+
+const lastWiki = (w: World) => w.argv.filter(a => a.includes('scripts/wiki-serve')).at(-1)
 
 const PANE_PROPS = { title: 'infra', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} }
 
@@ -137,7 +154,7 @@ test('the wiki-serve toggle runs scripts/wiki-serve on|off and the status line f
   expect((await ui.find({ key: 'wiki-serve-toggle' }))?.props).toMatchObject({ label: 'on' })
   await ui.press({ key: 'wiki-serve-toggle' })
   expect(w.argv).toContain(`${INFRA}/scripts/wiki-serve on`)
-  expect(w.toasts.join('\n')).toMatch(/wiki-serve ON: ON/)
+  expect(w.toasts.join('\n')).toMatch(/wiki-serve ON \(public only\): ON .*public only/)
   expect(w.statuses.at(-1)).toMatch(/wiki-serve ON/)
   await ui.unmount()
   const off = await $.command.run({ command: 'infra', args: 'wiki off', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
@@ -146,6 +163,58 @@ test('the wiki-serve toggle runs scripts/wiki-serve on|off and the status line f
   expect(w.statuses.at(-1)).not.toMatch(/wiki-serve ON/)
   const asked = await $.command.run({ command: 'infra', args: 'wiki', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
   expect(asked.text).toMatch(/wiki on/)
+})
+
+test('the wiki-serve mode: public by default, a switch to full and back, /infra wiki full|public', async ($, on) => {
+  const w = world(on)
+  const RUN = { command: 'infra', args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 160 } }
+  await $.command.run(RUN)
+  const ui = await $.ui.mount({ plugin: 'infra-pane', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'infra' })
+  expect((await ui.find({ type: 'Text', text: /wiki-serve off/ }))?.props).toMatchObject({ dimColor: true })
+  expect((await ui.find({ key: 'wiki-serve-mode' }))?.props).toMatchObject({ label: 'on full' })
+  expect((await ui.find({ key: 'wiki-serve-mode' }))?.props.hotkey).toBeUndefined() // no hotkey: FULL is never one keystroke away
+  // on = public only
+  await ui.press({ key: 'wiki-serve-toggle' })
+  expect(lastWiki(w)).toBe(`${INFRA}/scripts/wiki-serve on`)
+  expect((await ui.find({ type: 'Text', text: /wiki-serve ON public/ }))?.props).toMatchObject({ color: 'warning', bold: true })
+  expect((await ui.find({ key: 'wiki-serve-mode' }))?.props).toMatchObject({ label: '→ full' })
+  expect(w.statuses.at(-1)).toMatch(/wiki-serve ON/)
+  // switch to full: red, a warning toast, FULL on the status line
+  await ui.press({ key: 'wiki-serve-mode' })
+  expect(lastWiki(w)).toBe(`${INFRA}/scripts/wiki-serve on --full`)
+  expect(w.toasts.join('\n')).toMatch(/ON FULL: every tailnet device, the mac mini too/)
+  expect((await ui.find({ type: 'Text', text: /wiki-serve ON FULL/ }))?.props).toMatchObject({ color: 'error', bold: true })
+  expect((await ui.find({ key: 'wiki-serve-mode' }))?.props).toMatchObject({ label: '→ public' })
+  expect((await ui.find({ key: 'wiki-serve-toggle' }))?.props).toMatchObject({ label: 'off' })
+  expect(w.statuses.at(-1)).toMatch(/wiki-serve FULL/)
+  // and back to public
+  await ui.press({ key: 'wiki-serve-mode' })
+  expect(lastWiki(w)).toBe(`${INFRA}/scripts/wiki-serve on`)
+  expect(w.statuses.at(-1)).not.toMatch(/FULL/)
+  await ui.unmount()
+  // the command: full, public (= on), and the summary names the mode
+  const full = await $.command.run({ ...RUN, args: 'wiki full' })
+  expect(full.text).toMatch(/wiki-serve ON FULL/)
+  expect(lastWiki(w)).toBe(`${INFRA}/scripts/wiki-serve on --full`)
+  expect((await $.command.run(RUN)).text).toMatch(/wiki-serve ON \(FULL: local-only areas visible to every tailnet device\)/)
+  await $.command.run({ ...RUN, args: 'wiki public' })
+  expect(lastWiki(w)).toBe(`${INFRA}/scripts/wiki-serve on`)
+  expect((await $.command.run(RUN)).text).toMatch(/wiki-serve ON \(public only\)/)
+  expect((await $.command.run({ ...RUN, args: 'wiki everything' })).text).toMatch(/wiki full/)
+})
+
+test('wiki-serve listening without its launchd agent: mode unknown, and the switch restarts it public', async ($, on) => {
+  const w = world(on)
+  w.lsof = 0 // e.g. `wiki-serve run` by hand
+  const RUN = { command: 'infra', args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: true, columns: 160 } }
+  expect((await $.command.run(RUN)).text).toMatch(/wiki-serve ON \(mode unknown\)/)
+  expect(w.statuses.at(-1)).toMatch(/wiki-serve ON \(mode\?\)/)
+  const ui = await $.ui.mount({ plugin: 'infra-pane', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'infra' })
+  expect(await ui.find({ type: 'Text', text: /wiki-serve ON \(mode\?\)/ })).toBeDefined()
+  expect((await ui.find({ key: 'wiki-serve-mode' }))?.props).toMatchObject({ label: '→ public' })
+  await ui.press({ key: 'wiki-serve-mode' })
+  expect(lastWiki(w)).toBe(`${INFRA}/scripts/wiki-serve on`)
+  await ui.unmount()
 })
 
 test('the k8s section: off with a start button; on with per-namespace pods, a stop button, and the status line', async ($, on) => {

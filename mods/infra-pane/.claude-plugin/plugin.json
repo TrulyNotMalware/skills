@@ -1,7 +1,7 @@
 {
   "name": "infra-pane",
   "version": "0.1.0",
-  "description": "Live view of the local infra testbed (~/infra): which compose services are up, the OrbStack k8s cluster and its namespaces' pods, Tailscale state, wiki-serve, with stop buttons and wiki-serve / k8s toggles; a status line while anything runs; /infra opens it.",
+  "description": "Live view of the local infra testbed (~/infra): which compose services are up, the OrbStack k8s cluster and its namespaces' pods, Tailscale state, wiki-serve and its mode (public only / full), with stop buttons, wiki-serve on/off and mode switch, and the k8s toggle; a status line while anything runs; /infra opens it.",
   "types": "./types/index.d.ts",
   "author": {
     "name": "junho"
