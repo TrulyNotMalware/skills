@@ -46,9 +46,21 @@ def description(skill_md):
         return value.strip("'\"")
     return None
 
+def prose_lines(path):
+    """Lines outside fenced code blocks: code such as a Go generic call `f[T](x)` or a `# comment` is not
+    Markdown, so it must not count as a link or a heading."""
+    fence = None
+    for line in open(path, encoding="utf-8").read().split("\n"):
+        m = re.match(r"^\s*(```|~~~)", line)
+        if m:
+            fence = None if fence == m.group(1) else (fence or m.group(1))
+            continue
+        if fence is None:
+            yield line
+
 def anchors(path):
     out = set()
-    for line in open(path, encoding="utf-8"):
+    for line in prose_lines(path):
         m = re.match(r"^(#{1,6})\s+(.*)", line)
         if m:
             t = re.sub(r"[`*]", "", m.group(2).strip().lower())
@@ -92,7 +104,8 @@ def check(skill_dir):
         problems.append(f"SKILL.md description is {len(desc)} characters (limit {DESCRIPTION_MAX})")
     files = [skill_md] + sorted(glob.glob(os.path.join(skill_dir, "reference", "*.md")))
     for f in files:
-        for m in re.finditer(r"\]\(([^)#\s]*)(#[^)\s]*)?\)", open(f, encoding="utf-8").read()):
+        text = "\n".join(re.sub(r"`[^`\n]*`", "``", line) for line in prose_lines(f))  # drop inline code
+        for m in re.finditer(r"\]\(([^)#\s]*)(#[^)\s]*)?\)", text):
             target, anc = m.group(1), m.group(2)
             if target.startswith("http"):
                 continue

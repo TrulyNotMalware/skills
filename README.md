@@ -10,6 +10,7 @@ was verified and when.
 
 | Skill | Scope |
 | --- | --- |
+| [go-style](go-style/SKILL.md) | How to write Go, framework-independent: errors and nil, slices, maps, strings, JSON and time, goroutines, context and sync, tests, naming and API shape, and which of go vet, staticcheck, golangci-lint, gopls and go fix reports each pitfall. |
 | [kotlin-spring-boot](kotlin-spring-boot/SKILL.md) | Kotlin + Spring Boot 4 backends: beans and configuration, JPA and Hibernate 7, transactions, web and ProblemDetail, security, HTTP clients, scheduling and executors, coroutines, Kafka and outbox, Modulith, observability, tests, Gradle. |
 | [kotlin-style](kotlin-style/SKILL.md) | How to write Kotlin on the JVM, framework-independent: null safety, idioms, classes, collections, exceptions, ktlint and detekt findings. |
 | [python-fastapi](python-fastapi/SKILL.md) | Python + FastAPI backends: dependencies and lifespan, Pydantic v2, SQLAlchemy 2 async, asyncio, errors, streaming, security, observability, Kafka and Redis, tests, packaging. |
@@ -70,6 +71,14 @@ for reading and are not part of this repository:
 - https://github.com/rishapgandhi/python-skills (MIT)
 - https://github.com/manikosto/claude-code-python-stack (no license file)
 - https://github.com/awesome-skills/code-review-skill (MIT)
+- https://github.com/samber/cc-skills-golang (MIT)
+- https://github.com/JetBrains/go-modern-guidelines (Apache-2.0)
+- https://github.com/cxuu/golang-skills (Apache-2.0)
+- https://github.com/spf13/go-skills (MIT)
+- https://github.com/google/styleguide, `go/` (CC BY 3.0)
+- https://github.com/uber-go/guide (Apache-2.0)
+- https://github.com/teivah/100-go-mistakes (CC BY-NC-ND 4.0; used as a topic checklist only, no text
+  or examples taken)
 
 ## AGENTS.md
 
