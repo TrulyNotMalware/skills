@@ -86,6 +86,15 @@ def configure_logging() -> None:
   routes declared directly on that router; the prefix of a parent router that aggregates
   sub-routers with `include_router` is lost as well. Do not rely on `route.path` for versioned
   APIs; take the template from the native telemetry's `http.route`, which carries every prefix.
+- Record request status in a pure ASGI middleware, not in a decorator around the endpoint. Such a
+  decorator saw an `HTTPException(404)` only as an exception (recorded `500` while the client got
+  `404`) and never ran for a `422`, because validation happens before the endpoint. Reading
+  `http.response.start` in a middleware gives the real status, except for an unhandled exception:
+  that `500` is built by Starlette's `ServerErrorMiddleware` outside all user middleware. Count an
+  exception that escapes `await self.app(...)` as `500` only when no `http.response.start` was sent.
+  After the start the client already has its status, so keep it, and count the response as
+  incomplete only when no final body message (`more_body` false) was sent: a stream that fails
+  midway left a cut body, while a failing `BackgroundTasks` entry raised after a complete `200`.
 - **With several workers, each process has its own registry.** `/metrics` answers with whichever
   worker took the scrape (observed values alternating between workers), so every counter looks
   like it goes backwards. Use `prometheus_client`'s multiprocess mode (`PROMETHEUS_MULTIPROC_DIR`
@@ -111,12 +120,18 @@ def configure_logging() -> None:
   worker, flushes it at lifespan shutdown and registers an `atexit` flush. It is configured
   through `FastAPI(telemetry={...})`, a dict with the keys `tracing`, `metrics`, `logs`,
   `operation_spans`, `auto_configure` (read `OTEL_EXPORTER_OTLP_*` and add exporters, default
-  `True`), `exclude`, and `tracer_provider`/`meter_provider`/`logger_provider` to use explicit
-  providers instead of the globals. `auto_configure: False` stops the automatic exporter
+  `True` on 0.142, see the next point), `exclude`, and
+  `tracer_provider`/`meter_provider`/`logger_provider` to use explicit providers instead of the globals. `auto_configure: False` stops the automatic exporter
   set-up; `OTEL_SDK_DISABLED=true` disables the SDK entirely, your own provider included; `telemetry={"tracing": False}` turns request spans off.
   `auto_configure` adds its OTLP processor **on top of** whatever the provider already has, so a
   process whose provider is configured elsewhere exports every span twice while
   `OTEL_EXPORTER_OTLP_ENDPOINT` is set; pass `auto_configure: False` there.
+- **From FastAPI 0.143 the automatic exporter set-up is opt-in.** `auto_configure` defaults to
+  `False` unless `FASTAPI_OTEL_AUTO_CONFIGURE=true` is set. With only `OTEL_EXPORTER_OTLP_ENDPOINT` set,
+  0.143.0 exported nothing and logged nothing, where 0.142.4 exported traces and metrics. With the
+  variable set to `true` (any case) it exported again; `1` exported nothing. Passing
+  `telemetry={"auto_configure": True}` enabled it without the variable. The double export of the
+  previous point then also requires one of the two.
 - `opentelemetry-instrumentation-fastapi` (`FastAPIInstrumentor.instrument_app`) is optional on
   0.142+; native tracing switches itself off when the contrib middleware is present. Where it is
   used, call it in the factory before the application handles its first event: called from
@@ -159,7 +174,10 @@ def configure_logging() -> None:
 - Agent reads `scope["route"]` in middleware before `call_next`, or for an unmatched path - `KeyError`.
 - Agent versions the API with `include_router(prefix="/v1")`, or a parent `APIRouter(prefix="/v1")` that includes sub-routers, and labels metrics with `route.path` - all versions share one series.
 - Agent writes a custom structlog processor chain without `merge_contextvars` - bound request ids never appear.
-- Agent configures its own exporter and leaves `OTEL_EXPORTER_OTLP_ENDPOINT` set - spans are exported twice.
+- Agent configures its own exporter and leaves `OTEL_EXPORTER_OTLP_ENDPOINT` set (FastAPI 0.142; from 0.143 only with `FASTAPI_OTEL_AUTO_CONFIGURE=true` or `telemetry={"auto_configure": True}`) - spans are exported twice.
+- Agent upgrades to FastAPI 0.143 and relies on `OTEL_EXPORTER_OTLP_ENDPOINT` alone, or sets `FASTAPI_OTEL_AUTO_CONFIGURE=1` - nothing is exported and nothing is logged; set it to `true` or pass `telemetry={"auto_configure": True}`.
+- Agent records request metrics in a decorator around the endpoint - `HTTPException` statuses are counted as `500` and `422` responses are never counted; measure in a pure ASGI middleware.
+- Agent counts every exception that escapes the metrics middleware as `500` - a stream that fails after its `200` headers is recorded as `500` while the client got `200`.
 - Agent sets `PROMETHEUS_MULTIPROC_DIR` in `lifespan` - too late; `/metrics` is empty.
 - Agent labels metrics with `request.url.path` - unbounded series.
 - Agent runs `--workers 2` with the default registry - metrics alternate between processes.

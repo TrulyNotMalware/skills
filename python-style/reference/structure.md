@@ -95,13 +95,52 @@ if __name__ == "__main__":
   to a third module); do not paper over it with function-level imports everywhere.
 - `__all__` in a package's `__init__.py` when it re-exports names; keep `__init__.py` otherwise
   empty.
+- `from app.config import DEBUG` binds the object the name refers to at import time. Rebinding the
+  name later (`config.configure(...)` with `global`, `config.DEBUG = True`, a test's
+  `mock.patch("app.config.DEBUG", ...)`) is not seen through it; changing that same object in
+  place (an item of an imported dict) is. For module-level values that are rebound after import,
+  import the module (`from app import config`) and read `config.DEBUG`. **Nothing** reports it;
+  ruff `PLW0603` flags only a `global` statement in the owning module.
 
 ## Errors
 
 - One base exception per package (`class OrdersError(Exception)`), specific subclasses below it.
   Callers can catch the base; nobody has to catch `Exception`.
 - Raise built-in exceptions for programmer errors (`ValueError`, `TypeError`, `KeyError`), your
-  own for domain failures. Do not raise or catch bare `Exception`.
+  own for domain failures. Do not raise bare `Exception`.
+- Catch bare `Exception` only at an isolation boundary: one item of a batch, one message in a
+  worker loop, the outermost frame of a thread. Record the failure with its traceback
+  (`logger.exception(...)` or `exc_info=True`) and continue; everywhere else catch the specific
+  exception. ruff `BLE001` (ruff 0.16) accepts a handler that re-raises or logs with
+  `logger.exception` or `exc_info=True`, and reports one that only does `pass`, `continue` or
+  stores the exception, or logs with `logger.error(...)` or `logger.warning("%s", e)` and no
+  traceback. It also accepts a re-raise or log inside one `if` branch while the other branch
+  swallows the error, and it recognises the logger by name: `logger`, `log` and `self.logger`
+  pass, `_log`, `self._log` and `audit` are reported even with `.exception(...)`.
+- `copy.copy`, `pickle` and process pools rebuild an exception as `type(exc)(*exc.args)` and then
+  restore its attributes, so that call must work. A required parameter that is not in `args`
+  (positional or keyword-only) makes it a `TypeError`, and when a `ProcessPoolExecutor` worker
+  raises such an exception the caller gets `BrokenProcessPool` instead: the real error is lost and
+  the pool is unusable. A first parameter that is not the message comes back as a garbled message,
+  and an unpicklable attribute (a lock) reaches the caller as a pickling `TypeError`. **Nothing**
+  reports it. Give extra fields keyword-only parameters with defaults and pass only the message to
+  `super().__init__`. Passing every argument (`super().__init__(message, code)`) also works when
+  every parameter is positional, and makes `str(exc)` the tuple. A `__reduce__` works too, but a
+  subclass with another constructor inherits it and breaks the same way unless it defines its own.
+
+```python
+class ApiError(Exception):
+    def __init__(self, message: str, *, status_code: int = 500) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class RateLimitError(ApiError):
+    def __init__(self, message: str, *, retry_after: int = 0) -> None:
+        super().__init__(message, status_code=429)
+        self.retry_after = retry_after
+```
+
 - Do not return `None`, `False` or `-1` to signal failure from a function that normally returns
   a value. Raise, or make the absence part of the type (`User | None`) when "not found" is an
   ordinary outcome.
@@ -130,6 +169,14 @@ def parse_amount(order_id: int, raw: str) -> int:
   when the level is disabled. ruff `G004`.
 - Inside `except`, `logger.exception(...)` records the traceback; `logger.error(...)` does not.
   ruff `TRY400`. Log an exception or re-raise it, not both at every level.
+- A stdlib logger takes no arbitrary keyword arguments. `logger.error("failed", error=str(e))`
+  (structlog style, as popular guides write it) raises `TypeError` inside the `except` block, and
+  the caller gets that instead of the exception you meant to raise. Use format arguments or
+  `extra={"error": ...}`; an `extra` key that is a `LogRecord` attribute (`filename`, `module`,
+  `message`) is a `KeyError`. Both errors happen only when the call's level is enabled: a
+  `logger.debug(..., error=e)` passes every test run at INFO and raises once DEBUG is on. mypy
+  reports the keyword (`call-arg`), but not through a `LoggerAdapter` or an `Any`-typed logger;
+  ruff `G101` reports a clashing key in a literal `extra`.
 - Configure logging once, in the entry point. Library and module code never calls
   `logging.basicConfig` or adds output handlers; the one exception is a `logging.NullHandler`
   on a library's top-level logger.
@@ -164,12 +211,24 @@ warn_unreachable = true
 enable_error_code = ["ignore-without-code"]
 ```
 
-- Run `ruff format`, `ruff check` and `mypy` before reporting a change as done. ruff and mypy
-  overlap but neither replaces the other: `ANN` insists on `-> None` for every `__init__`,
-  which mypy `strict` does only when no parameter is annotated; mypy rejects a bare `list` or
-  `dict`, which ruff does not.
+- Before reporting a change as done, run `ruff check` without `--fix` and read it, then
+  `ruff check --fix`, `ruff format` and `mypy`. Fixing or formatting first erases evidence: a
+  missing comma between two strings in a list is merged into one literal and is not reported
+  afterwards ([idioms](idioms.md#strings-numbers-and-time)).
+- ruff and mypy overlap but neither replaces the other: `ANN` insists on `-> None` for every
+  `__init__`, which mypy `strict` does only when no parameter is annotated; mypy rejects a bare
+  `list` or `dict`, which ruff does not.
 - Adopt the selection above only in a new project. In an existing one, keep its rule set and
   write code that would also pass these.
+- The configuration above assumes the project's oldest supported Python is 3.14. When
+  `requires-python` is lower, each tool needs the floor separately. mypy checks against the
+  interpreter it runs under and pyright against the Python it finds (`python` on `PATH`, or
+  `--pythonpath`); neither reads `requires-python`, so set mypy `python_version` and pyright
+  `pythonVersion` to the floor. ty reads `requires-python` (ty 0.0.86). ruff takes its target from
+  `requires-python` unless `target-version` is set; with a higher `target-version` its unsafe `UP`
+  fixes write `type X = ...` and `def f[T]`, which the floor cannot parse. ruff does not check
+  standard-library APIs against the floor (`itertools.batched` on 3.11); mypy and pyright with the
+  floor set, and ty, do.
 - `# noqa: CODE` and `# type: ignore[code]` always carry the code and, when it is not obvious, a
   reason.
 - What no tool reports is listed in [idioms](idioms.md): `value or default`, shared rows,
@@ -190,6 +249,12 @@ enable_error_code = ["ignore-without-code"]
 - Agent assumes `frozen=True` makes a dataclass deeply immutable - list and dict fields can still be changed.
 - Agent returns `None` on failure from a function annotated `-> User` - callers crash later, far from the cause; mypy reports it only because the annotation is there.
 - Agent restates the parameter types in the docstring - they drift from the annotations.
+- Agent gives a custom exception a constructor that `type(exc)(*exc.args)` cannot call - it cannot be copied or unpickled, and in a `ProcessPoolExecutor` the caller gets `BrokenProcessPool` instead of the error.
+- Agent logs structlog-style keyword arguments through a stdlib logger - the `TypeError` raised in the `except` block replaces the real exception; in a `debug` call only once DEBUG is enabled.
+- Agent imports a setting with `from config import DEBUG` - later changes and test patches are not seen.
+- Agent catches `Exception` in a batch or worker loop and logs only the message - the traceback is lost; use `logger.exception` or `exc_info=True`.
+- Agent runs `ruff format` or `ruff check --fix` before reading the lint output - a missing comma between two strings is merged away and nothing reports it.
+- Agent sets ruff `target-version` above `requires-python` and applies unsafe fixes - the code no longer parses on the oldest supported Python.
 
 ## Official sources
 

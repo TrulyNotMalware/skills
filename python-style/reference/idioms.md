@@ -121,12 +121,22 @@ def pairs(names: list[str], ages: list[int]) -> dict[str, int]:
   reports it only when the argument repeats a character (`".txt"`, `"https://"`);
   `rstrip(".csv")` is not reported.
 - Two string literals next to each other are joined: `["a", "b" "c"]` has two elements. A missing
-  comma in a list is therefore silent at runtime. ruff `ISC001`/`ISC004`.
+  comma in a list is therefore silent at runtime. ruff `ISC001` (one line) and `ISC004` (in a
+  collection) report it only until the file is rewritten (ruff 0.16): `ruff format` merges the pair
+  into one literal when it fits the line, `ruff check --fix` merges a one-line pair (the `ISC001`
+  fix is safe), `--unsafe-fixes` wraps it in parentheses, and then nothing reports it. Read
+  `ruff check` without `--fix` first ([structure](structure.md#tooling)).
 - A trailing comma makes a tuple: `timeout = 30,` is `(30,)`. ruff `COM818`; mypy too when the
   variable is annotated or used as a number.
 - `float` is binary: `0.1 + 0.2 != 0.3`, and `round(2.5)` is `2` (round half to even). Use
   `decimal.Decimal` built from strings, or integer minor units, for money. **Nothing** reports a
   `float` used for an amount.
+- `float()` parses `"nan"` and `"inf"`, `json.loads` accepts `NaN` and `Infinity`, and with NaN
+  `==` and every ordering comparison are `False` (`!=` is `True`). `if x < 0 or x > 1: raise` lets
+  NaN through; a lower bound alone (`if x < 0`) lets NaN and `inf` through. When validating a
+  parsed float, check `math.isfinite(x)` and write the range as `not lo <= x <= hi`. `sorted()` of
+  a list containing NaN is not sorted. **Nothing** reports it; ruff `PLW0177` flags only a
+  comparison with NaN written into it (`float("nan")`, `math.nan`), not one with a parsed value.
 - `datetime.now()` and `datetime.utcnow()` return naive values; `utcnow` is deprecated. Use
   `datetime.now(UTC)`. Comparing a naive with an aware value with `<` raises `TypeError`, but
   `==` just returns `False`. ruff `DTZ` reports the naive constructors.
@@ -171,6 +181,17 @@ def parse_port(raw: str) -> int:
 - Catch the narrowest exception that the code can handle, and handle it. `except Exception:
   pass` hides bugs; ruff `BLE001`. A bare `except:` also catches `KeyboardInterrupt`,
   `SystemExit` and `asyncio.CancelledError` (none of them is an `Exception`); ruff `E722`.
+- The reverse also holds: cleanup in `except Exception:` (roll back, then `raise`) does not run on
+  `KeyboardInterrupt`, `sys.exit()` or `asyncio.CancelledError`. Under `asyncio.timeout`, a handler
+  inside the `async with` block sees the cancellation and is skipped; one around the block sees the
+  `TimeoutError` it becomes and runs. Put cleanup that must always run in `finally`, behind a flag
+  set after the commit ([example](#resources-and-processes)). **Nothing** reports it; `BLE001` is
+  silent because the handler re-raises.
+- Keep only the call that raises the expected exception in `try` and put the rest in `else`. In
+  `try: entry = cache[key]; return entry["size"]` with `except KeyError:`, a misspelled key on the
+  second line is handled as a cache miss. ruff `TRY300` reports only some shapes: `return value`
+  after other statements is reported, `return entry["size"]`, a returned call and an assignment
+  are not. Do not rely on it to find a wide `try`.
 - Translate with `raise NewError(...) from exc` so the original traceback stays attached. ruff
   `B904`. Re-raise unchanged with a bare `raise`.
 - `return` (or `break`) inside `finally` swallows the exception in flight and overrides the
@@ -190,6 +211,43 @@ def parse_port(raw: str) -> int:
   input (ruff `S602`, if the project enables the `S` rules).
 - Open files, locks, sockets and temporary directories with `with`. ruff `SIM115` reports an
   `open()` outside one.
+- In a `@contextmanager` (or `@asynccontextmanager`) generator, code after a `yield` that is not
+  inside `try`/`finally` is skipped when the `with` body raises, for `yield` and `yield value`
+  alike: the lock is not released, the directory not restored. Put the cleanup in a `finally`
+  around the `yield`. ruff reports it only in preview (`RUF075`); mypy does not. A transaction
+  that, once `begin()` has returned, rolls back on every exit that does not commit,
+  `BaseException` included (a `begin()` that raises is not rolled back):
+
+```python
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Protocol
+
+
+class Connection(Protocol):
+    def begin(self) -> None: ...
+    def commit(self) -> None: ...
+    def rollback(self) -> None: ...
+
+
+@contextmanager
+def transaction(conn: Connection) -> Generator[Connection]:
+    conn.begin()
+    committed = False
+    try:
+        yield conn
+        conn.commit()
+        committed = True
+    finally:
+        if not committed:
+            conn.rollback()
+```
+
+- An executor keeps a worker's exception in the `Future` until `.result()` is called.
+  `pool.submit(fn)` with the future never read, `pool.map(...)` whose iterator is never consumed,
+  and `wait(futures)` all return normally, in `ThreadPoolExecutor` and `ProcessPoolExecutor` alike,
+  and nothing is logged. Call `.result()` on every future (`as_completed`) or consume `pool.map`.
+  **Nothing** reports it.
 
 ## Gotchas
 
@@ -210,7 +268,12 @@ def parse_port(raw: str) -> int:
 - Agent validates input with `assert` - the check disappears under `-O`.
 - Agent runs `subprocess.run(cmd)` and continues - a failed command goes unnoticed without `check=True`.
 - Agent decorates a method with `functools.cache` - instances are never freed.
-- Agent drops a comma between two string literals in a list - two entries merge into one.
+- Agent drops a comma between two string literals in a list - two entries merge into one; after `ruff format` or `ruff check --fix` nothing reports it.
+- Agent validates a parsed float with `x < 0 or x > 1` - `float("nan")` passes.
+- Agent wraps a lookup and the code that uses its result in one `try/except KeyError` - a bug's `KeyError` is handled as the expected miss.
+- Agent rolls back in `except Exception:` and re-raises - Ctrl+C, `sys.exit()` or a cancelled task skips the rollback.
+- Agent puts cleanup after a `yield` that is not inside `try`/`finally` in a `@contextmanager` - it is skipped whenever the `with` block raises.
+- Agent submits work to an executor and never reads the futures - every exception in the workers is lost.
 
 ## Official sources
 

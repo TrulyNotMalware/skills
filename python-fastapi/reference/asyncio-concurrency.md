@@ -13,7 +13,7 @@ Contents: [Tasks and ownership](#tasks-and-ownership) · [Cancellation](#cancell
 ```python
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class TaskOwner:
-    """Keeps references to background tasks, logs their failures, cancels them on shutdown."""
+    """Keeps task references, logs task failures, cancels the tasks on shutdown."""
 
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -46,7 +46,7 @@ class TaskOwner:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, TaskOwner]]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, TaskOwner]]:
     owner = TaskOwner()
     try:
         yield {"tasks": owner}
@@ -185,6 +185,13 @@ async def bounded_map[T, R](
   starves only its own users.
 - Do not touch loop-bound objects (locks, clients, sessions) from inside the thread. Return plain
   data and continue on the loop.
+- Do not create a `ThreadPoolExecutor` per call in a `with` block around `run_in_executor` (as
+  popular guides show). When the await is cancelled (`asyncio.timeout`, `wait_for`, shutdown), the
+  `with` exit runs `shutdown(wait=True)` on the loop thread and blocks the loop until the thread
+  returns: a 0.2 s timeout around a 2 s call raised after 2.0 s and froze the loop for 1.8 s, on
+  the stdlib loop and uvloop; inside a uvicorn handler every other request waited 1.8 s. A client
+  that times out does not cancel the handler, so it does not trigger this. `asyncio.to_thread` or
+  one shared executor (create it in `lifespan`) stalled the loop 0.02 s.
 - `asyncio.Lock`, `Event`, `Semaphore` created at import time are fine on 3.14; they bind to a
   loop on the first `await` that actually **waits**, not on first use. Shared between two loops (a
   second `asyncio.run`, for example inside a `def` handler or a sync script) they work while
@@ -222,6 +229,7 @@ async def bounded_map[T, R](
 - Agent cancels a task that runs `to_thread` and expects the thread to stop - it runs to completion.
 - Agent sets a `ContextVar` inside `to_thread` and reads it after - the thread had a copy.
 - Agent uses `run_in_executor` and reads request context in the function - context is not copied.
+- Agent creates a `ThreadPoolExecutor` in a `with` block for each call - a timeout or cancellation joins the thread on the event loop; every request stalls until the blocking call returns.
 - Agent calls `asyncio.get_event_loop()` in a script or fixture on 3.14 - `RuntimeError`, no implicit loop.
 - Agent relies on `asyncio.gather` failing fast - it raises on the first failure but the rest continue; the raise itself hides later failures.
 

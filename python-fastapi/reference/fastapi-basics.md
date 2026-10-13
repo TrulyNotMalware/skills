@@ -12,7 +12,7 @@ Contents: [Application and lifespan](#application-and-lifespan) · [Dependencies
 ## Application and lifespan
 
 ```python
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
     async with httpx.AsyncClient(timeout=10.0) as http:
         yield {"http": http}
 
@@ -129,6 +129,15 @@ Consequences:
   returns, before the response is sent. A failure there becomes a `500`, and an `HTTPException`
   raised there is returned to the client. The resource is then already closed while the response is
   streamed and while background tasks run.
+- In a generator endpoint (a handler that `yield`s,
+  [streaming-background](streaming-background.md#generator-endpoints)) the `scope="function"` exit code
+  runs **before** the handler body starts, so the body receives a closed session. An `AsyncSession`
+  used after `close()` silently begins a new transaction. A write that relies on the dependency's
+  commit is never committed, the response is `200`, and the connection stays checked out until
+  garbage collection, which logs `SAWarning: The garbage collector is trying to clean up
+  non-checked-in connection`. With SQLite its open write transaction makes every other writer fail
+  with `database is locked` after 5 s until then. A body that calls `await session.commit()` itself
+  persists and returns the connection (SQLAlchemy 2.1, aiosqlite).
 - A default-scope dependency with `yield` cannot depend on a `scope="function"` one: the route
   definition raises `DependencyScopeError` (FastAPI 0.142). A plain dependency without `yield` (a
   repository factory) can, and the check does not look through it: a request-scoped `yield`
@@ -173,9 +182,16 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   `FastAPIError: Response not awaited ...` with the default scope, and with `scope="function"` an
   `UnboundLocalError` about `response` from inside FastAPI's routing code, which does not mention
   the dependency.
-- The dependency sees every exception the handler raises, including `HTTPException`. A bare
-  `except Exception: rollback(); raise` therefore also runs for ordinary 4xx responses, which is
-  usually what you want for a transaction.
+- The dependency sees every exception the handler raises, including `HTTPException`, and a request
+  deadline applied around the app in middleware (`asyncio.timeout` or an AnyIO cancel scope) as
+  `CancelledError`. With the session opened by `async with SessionLocal()` as above, closing already
+  rolls back an uncommitted transaction and returns the connection on every exit: after an
+  `HTTPException(409)` that followed a flush, and after such a deadline, the row was absent, no
+  connection stayed checked out and the next writer was not blocked (SQLAlchemy 2.1, aiosqlite). An
+  added `except Exception: await session.rollback(); raise` changes nothing there, and it does not
+  run for the middleware deadline. An `asyncio.timeout` inside the handler arrives as `TimeoutError`
+  and does run it, with the same result. Without the `async with`, close
+  the session in `finally`. A client disconnect does not cancel such a handler: it ran on and committed.
 
 ## Routing
 
@@ -194,6 +210,18 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   Write `tags: Annotated[list[str], Query()] = []`.
 - `docs_url=None` disables only Swagger UI. `/redoc` and `/openapi.json` stay reachable. To hide
   the API description, pass `openapi_url=None`, which removes all three.
+- Put a router's prefix on the `APIRouter` that declares the routes, not in
+  `include_router(router, prefix=...)`: only the former is part of `route.path` (`/v1/items/{item_id}`
+  vs `/items/{item_id}`), which metrics use as a label
+  ([config-observability](config-observability.md#metrics)).
+- `app.frontend("/", directory="dist")` (FastAPI 0.142) serves a built frontend behind all API
+  routes, with an `index.html` fallback for any unknown `GET` whose `Accept` includes `text/html`.
+  A browser opening a mistyped API URL therefore gets `200` and the app page; a client sending
+  `application/json` or `*/*` gets `404`. Its default `fallback="auto"` prefers a `404.html` from
+  the build: when the build contains one, every single-page-app deep link answers `404` with that
+  page. Pass `fallback="index.html"` for single-page apps. A missing directory stops the app at
+  import with `RuntimeError`, except under `FASTAPI_ENV=development` (`fastapi dev` sets it), where it
+  only warns: the API answers and the frontend path returns `500`.
 
 ## Responses
 
@@ -201,9 +229,19 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   not on the model are removed, including extra fields of a returned subclass instance. Without
   either, the handler's return value is sent as is. A response model configured with
   `extra="allow"` removes nothing.
-- A returned **model instance** is not validated again (`revalidate_instances="never"` is the
-  Pydantic default): an instance changed after creation, or built with `model_construct()`, is
-  sent with its invalid values and status `200`. Dicts and ORM objects are validated.
+- A returned **model instance** is not validated again field by field (`revalidate_instances="never"`
+  is the Pydantic default): an instance changed after creation, or built with `model_construct()`,
+  is sent with values that break its field constraints and status `200`. Its
+  `model_validator(mode="after")` and `mode="wrap"` validators **do** run again on the way out
+  (return annotation or `response_model=`; not with `response_model=None`): one that mutates is
+  applied twice (`"Dr. Dr. Kim"`, a list appended twice), and an invariant check turns a mutated
+  instance into a `500`. Field validators and `mode="before"` validators do not run again. Returned
+  dicts and ORM objects are validated (a dict's `after` validator ran once; Pydantic 2.13, FastAPI 0.142).
+- `ORJSONResponse` and `UJSONResponse` are deprecated (FastAPI 0.142); the first response through
+  one logs a `FastAPIDeprecationWarning`, visible under `uvicorn module:app`. Any non-default
+  `response_class` or `default_response_class` also skips FastAPI's direct Pydantic-to-JSON path
+  (from source): with a return type, a `NaN` field is `null` by default but a `500` with
+  `response_class=JSONResponse`, and an `int` beyond 64 bits is a `500` with `ORJSONResponse`.
 - Filtering and validation are skipped when the handler returns a `Response` object
   (`JSONResponse(...)`) or when the route sets `response_model=None`, whatever the return
   annotation says. With `response_model=None` and an ordinary return value (such as a dict),
@@ -231,7 +269,10 @@ took 1.5 s in total (serialized), `time.sleep` in `def` 0.3 s, `await asyncio.sl
 - The threadpool is bounded (40 threads). `def` handlers, `def` dependencies, `run_in_threadpool`
   and sync background tasks share it. Once all threads wait on slow calls, further requests queue,
   including `async def` handlers that have a `def` dependency. Only handlers that are `async def`
-  all the way down keep answering.
+  all the way down keep answering. To raise the limit, set
+  `anyio.to_thread.current_default_thread_limiter().total_tokens = 100` in `lifespan`. The limiter
+  belongs to the running loop, so at import time the call raises `NoEventLoopError`. Measured: 60
+  concurrent `def` requests that sleep 0.5 s took 1.06-1.11 s at 40, 0.57-0.58 s at 100.
 - Pure-Python CPU-bound work gains nothing from either model on a GIL build. In `async def` it
   stalls the loop; in `def` the loop stays responsive but the threads run one at a time. Move it
   to a process pool or a task queue. Extensions that release the GIL (bcrypt, hashlib, numpy) do
@@ -240,7 +281,11 @@ took 1.5 s in total (serialized), `time.sleep` in `def` 0.3 s, `await asyncio.sl
   Inside a `def` handler it succeeds, on a **new** loop in the worker thread: objects bound to the
   application's loop (engines, clients, locks created in `lifespan`) must not be used there. They
   fail intermittently (`... is bound to a different event loop`, `Event loop is closed`) and can
-  be left bound to the dead loop, so later `async def` handlers fail too.
+  be left bound to the dead loop, so later `async def` handlers fail too. Use
+  `anyio.from_thread.run(coro_fn, *args)` instead: from a `def` handler or dependency it runs the
+  coroutine on the application's loop. In a thread AnyIO did not start (your own
+  `ThreadPoolExecutor`) it raises `NoEventLoopError`. `asyncer.syncify` (asyncer 0.0.18) behaves the
+  same, except that `raise_sync_error=False` silently falls back to a new loop.
 - Calling an `async def` function without `await` creates a coroutine object and runs nothing.
   When the result is discarded, Python reports it only as a
   `RuntimeWarning: coroutine ... was never awaited` and the request succeeds. When the coroutine is
@@ -315,10 +360,17 @@ define models and dependency aliases at module level.
 - Agent calls a coroutine function without `await` and discards the result - nothing runs and no exception is raised.
 - Agent adds `CORSMiddleware` and debugs a "CORS error" in the browser - it is an unhandled `500`, which bypasses the middleware.
 - Agent mounts a sub-application with its own `lifespan` - the child's startup never runs.
-- Agent returns a model instance it modified after creation - the response model does not re-validate it.
+- Agent returns a model instance it modified after creation - field constraints are not re-checked (`200` with invalid values), but `after` and `wrap` model validators run again.
+- Agent mutates fields in a `model_validator(mode="after")` of a model that handlers return - returned instances get the change twice.
+- Agent sets `default_response_class=ORJSONResponse` for speed - deprecated; it skips Pydantic's JSON serializer, and integers beyond 64 bits become `500`.
+- Agent injects a `scope="function"` session into a generator endpoint - it is committed and closed before the body runs; writes that rely on that commit are lost, and the connection (with SQLite, the write lock) is held until garbage collection.
+- Agent serves a single-page-app build that contains a `404.html` with `app.frontend()` - deep links answer `404`; pass `fallback="index.html"`.
+- Agent tests `app.frontend()` only under `fastapi dev` - a missing build directory only warns there, and the deployed app fails at import.
+- Agent sets the threadpool size at import time - `NoEventLoopError`; set `total_tokens` in `lifespan`.
 - Agent sets a cookie on the injected `Response` and returns a `JSONResponse` - the cookie is dropped.
 - Agent mutates a list or dict yielded by `lifespan` through `request.state` - the change is shared by all requests.
-- Agent uses `asyncio.run()` in a `def` handler to reach async code - it runs on another loop; loop-bound clients and engines fail intermittently, later also in `async def` handlers.
+- Agent uses `asyncio.run()` in a `def` handler to reach async code - it runs on another loop; loop-bound clients and engines fail intermittently, later also in `async def` handlers. Use `anyio.from_thread.run`.
+- Agent passes `raise_sync_error=False` to `asyncer.syncify` to silence an error - the coroutine runs on a new loop, like `asyncio.run()`.
 - Agent wraps the app in `CORSMiddleware(app, ...)` and sets `dependency_overrides` on the wrapper - the wrapper has no such attribute; use the inner app.
 - Agent keeps state in module globals or `app.state` and deploys with several workers - each process has its own copy.
 - Agent adds `from __future__ import annotations` to a module with locally defined models or dependencies - body and dependencies become query parameters; startup succeeds.

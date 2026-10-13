@@ -14,8 +14,8 @@ was verified and when.
 | [go-service](go-service/SKILL.md) | Go services and long-running daemons on the standard library: net/http routing, handlers, server timeouts and shutdown, HTTP clients, database/sql with SQLite and pgx, auth, config, slog and telemetry, a log-following daemon, Kafka (franz-go) and Redis (go-redis), tests. |
 | [kotlin-spring-boot](kotlin-spring-boot/SKILL.md) | Kotlin + Spring Boot 4 backends: beans and configuration, JPA and Hibernate 7, transactions, web and ProblemDetail, security, HTTP clients, scheduling and executors, coroutines, Kafka and outbox, Modulith, observability, tests, Gradle. |
 | [kotlin-style](kotlin-style/SKILL.md) | How to write Kotlin on the JVM, framework-independent: null safety, idioms, classes, collections, exceptions, ktlint and detekt findings. |
-| [python-fastapi](python-fastapi/SKILL.md) | Python + FastAPI backends: dependencies and lifespan, Pydantic v2, SQLAlchemy 2 async, asyncio, errors, streaming, security, observability, Kafka and Redis, tests, packaging. |
-| [python-style](python-style/SKILL.md) | How to write Python, framework-independent: complete type annotations, idioms, conventions, ruff and mypy configuration. |
+| [python-fastapi](python-fastapi/SKILL.md) | Python + FastAPI backends: dependencies and lifespan, Pydantic v2, SQLAlchemy 2 async and Alembic migrations, asyncio, errors, streaming and generator endpoints, security, observability, Kafka and Redis, tests, packaging with pip or uv. |
+| [python-style](python-style/SKILL.md) | How to write Python, framework-independent: complete type annotations, idioms, conventions, ruff and mypy configuration, and what ty or pyright do not report. |
 | [review-remediation](review-remediation/SKILL.md) | Stack-independent: how to act on an existing review without breaking things, including fix interactions and parallel workers. |
 
 Each skill is one directory: `SKILL.md` (the version table, the always-on rules, a routing table,
@@ -72,6 +72,13 @@ for reading and are not part of this repository:
 - https://github.com/rishapgandhi/python-skills (MIT)
 - https://github.com/manikosto/claude-code-python-stack (no license file)
 - https://github.com/awesome-skills/code-review-skill (MIT)
+- https://github.com/fastapi/fastapi, the agent skill bundled in `fastapi/.agents/skills/fastapi` (MIT)
+- https://github.com/zhanymkanov/fastapi-best-practices (no license file; used as a topic checklist only)
+- https://github.com/Kludex/fastapi-tips (no license file; used as a topic checklist only)
+- https://github.com/wshobson/agents, `plugins/python-development` (MIT)
+- https://github.com/astral-sh/claude-code-plugins (Apache-2.0 or MIT)
+- https://github.com/trailofbits/skills, `plugins/modern-python` (CC BY-SA 4.0; used as a topic checklist only)
+- https://github.com/google/styleguide, `pyguide.md` (CC BY 3.0)
 - https://github.com/samber/cc-skills-golang (MIT)
 - https://github.com/JetBrains/go-modern-guidelines (Apache-2.0)
 - https://github.com/cxuu/golang-skills (Apache-2.0)

@@ -11,7 +11,7 @@ Contents: [Producer](#producer) · [Consumer](#consumer) ·
 
 ```python
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
     producer = AIOKafkaProducer(
         bootstrap_servers="localhost:9092",
         enable_idempotence=True,  # implies acks="all"
@@ -72,7 +72,7 @@ async def publish(request: Request, topic: str, key: str, value: dict[str, Any])
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from aiokafka import AIOKafkaConsumer
@@ -103,7 +103,7 @@ async def park(message: object) -> None: ...
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     consumer = AIOKafkaConsumer(
         "orders",
         bootstrap_servers="localhost:9092",

@@ -69,6 +69,12 @@ class Booking(BaseModel):
         return self
 ```
 
+- When the project uses SQLModel: a `table=True` model does not validate, neither on construction
+  nor as a FastAPI body parameter. `Hero(name=1, age="x")`, and `Hero(age=-5)` without the required
+  `name`, are accepted; a body `{"age": "x"}` reaches the handler with `200` (sqlmodel 0.0.48).
+  `Hero.model_validate(...)` and non-table models do raise. Declare bodies with a non-table model
+  (`HeroCreate`) and build the row with `Hero.model_validate(hero_create)`.
+
 ## Type coercion
 
 Default (lax) mode converts compatible input. Observed conversions:
@@ -143,7 +149,9 @@ assert changes(ItemUpdate.model_validate({})) == {}
   with `Z` and other offsets as `+09:00`, naive datetimes ISO 8601 **without offset** (clients
   guess the zone). `NaN` and infinity become `null` in `model_dump_json()` and in a FastAPI
   response with a declared response model; `model_dump(mode="json")` keeps the `nan` float, and a
-  `JSONResponse` or plain dict fails with `500`. To refuse non-finite values use
+  `JSONResponse` or plain dict fails with `500`. The `null` needs the default response class: the
+  same route answers `500` when it sets `response_class=JSONResponse` or the application sets
+  `default_response_class=JSONResponse` (FastAPI 0.142). To refuse non-finite values use
   `Field(allow_inf_nan=False)`; it acts on validation, so a returned instance built without
   validation still sends `null`.
 - A handler that returns a plain `dict` without a response model goes through
@@ -157,6 +165,33 @@ assert changes(ItemUpdate.model_validate({})) == {}
   (`"**********"`); `model_dump()` in Python mode returns the `SecretStr` object itself, which
   `json.dumps` cannot encode. An empty secret dumps as `""`, not as the mask. Reading the value
   takes `.get_secret_value()`. A response model with a `SecretStr` field sends the mask.
+- A `@field_serializer("*")` on a shared base model (as popular guides suggest for one datetime
+  format) erases the types in `/openapi.json`: each field becomes `{"title": ...}`, a nested model
+  `{}`. It formats the fields of models that inherit the base; datetimes in lists and dicts, and
+  in nested models that do not inherit the base, keep the default format, so one body mixes both.
+  Normalize with a type alias instead. The alias below keeps `date-time` in the schema, applies
+  inside lists, and sends UTC as `Z`; a `PlainSerializer(..., return_type=str)` alias also keeps
+  the type but drops `format: date-time` (FastAPI 0.142). The alias acts on validation only
+  (`model_construct()` skips it) and rejects naive datetimes: returning a model built from one is
+  a `500`, and naive input is a `422` (`timezone_aware`).
+
+```python
+from datetime import UTC, datetime
+from typing import Annotated
+
+from pydantic import AfterValidator, AwareDatetime, BaseModel
+
+
+def _to_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC)
+
+
+UtcDatetime = Annotated[AwareDatetime, AfterValidator(_to_utc)]
+
+
+class Event(BaseModel):
+    at: UtcDatetime
+```
 
 ## Request bodies in FastAPI
 
@@ -216,7 +251,38 @@ def get_settings() -> Settings:
   the default is used; only required fields without a default fail at startup. Give settings
   that must be configured **no default**.
 - Complex fields are parsed as JSON: `APP_ALLOWED_HOSTS=a,b` raises `SettingsError`;
-  `APP_ALLOWED_HOSTS=["a","b"]` works.
+  `APP_ALLOWED_HOSTS=["a","b"]` works. A `mode="before"` validator that splits on commas does not
+  help (as popular guides suggest): the JSON decoding fails before it runs. Mark the field
+  `NoDecode` to pass the raw string to the validator; the field then no longer accepts JSON: a
+  JSON list is split on its commas (`["a","b"]` becomes `'["a"'` and `'"b"]'`) (pydantic-settings
+  2.15).
+
+```python
+from typing import Annotated
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_")
+
+    allowed_hosts: Annotated[list[str], NoDecode] = []
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def split_csv(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return value
+```
+
+- `HttpUrl` and `AnyUrl` give a bare host the path `/`: `https://api.example.com` becomes
+  `https://api.example.com/`, so `f"{settings.api_url}/v1/items"` requests `//v1/items`, which a
+  FastAPI upstream answers `404`. A URL with a path (`.../base`) gets no slash, so the same
+  f-string works there. Pass the URL as `httpx.AsyncClient(base_url=str(url))` and request
+  relative paths; `"/v1/items"` and `"v1/items"` both resolved correctly for both URL shapes
+  (httpx 0.28).
 - Nested models are filled through the delimiter: `APP_POOL__SIZE=9`. A nested variable replaces
   the **whole** default object, not one field: with `pool: Pool = Pool(enabled=True)`,
   `APP_POOL__SIZE=9` yields `Pool(size=9, enabled=False)`. Set
@@ -271,6 +337,11 @@ def get_settings() -> Settings:
 - Agent adds `env_file` to settings that share a `.env` with other tools - `extra_forbidden` at startup.
 - Agent customises a nested model's default and sets one nested variable - the other customised values revert to the nested model's defaults.
 - Agent puts a `SecretStr` field in a response model - the client receives the mask.
+- Agent sets `response_class=JSONResponse` or `default_response_class=JSONResponse` where a response model can hold `NaN` or infinity - `500` instead of `null`.
+- Agent adds a wildcard `field_serializer("*")` to a shared base model (as popular guides suggest) - every response field loses its OpenAPI type, and datetimes in lists, dicts or nested models outside the base keep the old format.
+- Agent splits a comma-separated setting in a `mode="before"` validator without `NoDecode` - startup fails with `SettingsError`.
+- Agent appends paths to an `HttpUrl` setting with an f-string - a bare host gains a `/`; the request goes to `//path` and gets `404`.
+- Agent uses a SQLModel `table=True` model as a request body or builds one from unvalidated data - nothing is validated; wrong types and missing required fields pass silently.
 
 ## Official sources
 

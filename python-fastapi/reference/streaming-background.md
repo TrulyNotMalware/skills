@@ -5,7 +5,7 @@ the response has started, the status code, the headers and the error handling ar
 whatever goes wrong afterwards is visible only in the server log.
 
 Contents: [Choosing the shape](#choosing-the-shape) · [StreamingResponse](#streamingresponse) ·
-[Server-Sent Events](#server-sent-events) · [WebSockets](#websockets) ·
+[Generator endpoints](#generator-endpoints) · [Server-Sent Events](#server-sent-events) · [WebSockets](#websockets) ·
 [BackgroundTasks](#backgroundtasks) · [Long-running work](#long-running-work) · [Gotchas](#gotchas)
 
 ## Choosing the shape
@@ -13,7 +13,8 @@ Contents: [Choosing the shape](#choosing-the-shape) · [StreamingResponse](#stre
 | Work | Shape |
 |---|---|
 | Finishes well within client and proxy timeouts | plain response |
-| Produces output incrementally, client consumes as it arrives | `StreamingResponse` (bytes), SSE (events) |
+| Produces output incrementally, client consumes as it arrives | returned `StreamingResponse` or a [generator endpoint](#generator-endpoints) (bytes), SSE (events) |
+| A sequence of typed records, each usable as it arrives | generator endpoint without `response_class` (and no `default_response_class`): JSON Lines, each item validated (FastAPI 0.142) |
 | Long, may outlive the connection, must survive a disconnect or a restart | accept with `202` and a job id; run in a worker; expose status and a result endpoint; push progress over SSE or WebSocket if wanted |
 | Short side effect after the response (email, audit row) | `BackgroundTasks`, and only if losing it on a crash is acceptable |
 
@@ -64,13 +65,75 @@ async def export() -> StreamingResponse:
   connection for that long only while its transaction is open: after a read without `commit()`
   the connection stays checked out during the stream, after `commit()` it is back in the pool.
   Commit before streaming, and page through the data for long exports.
-- On client disconnect an async generator is cancelled at its next **own** `await`
-  (`CancelledError`, `finally` runs). uvicorn's `send` never suspends after a disconnect, so a
-  generator whose only suspension point is the `yield` runs to the end, writing into the void
-  ([asyncio-concurrency](asyncio-concurrency.md#cancellation)).
+- On client disconnect an async generator passed to a returned `StreamingResponse` is cancelled at
+  its next **own** `await` (`CancelledError`, `finally` runs). uvicorn's `send` never suspends
+  after a disconnect, so a generator whose only suspension point is the `yield` runs to the end,
+  writing into the void, and an endless one hangs the process (asyncio and uvloop alike;
+  [asyncio-concurrency](asyncio-concurrency.md#cancellation)). Generator endpoints differ (next section).
 - `GZipMiddleware` still streams (chunks arrive as produced), but it holds status and headers back
   until the first body chunk, and it never compresses `text/event-stream`.
 - Test clients buffer the whole stream ([testing](testing.md#choosing-a-client)).
+
+## Generator endpoints
+
+A handler that `yield`s instead of returning a response is streamed by FastAPI itself (FastAPI 0.142).
+Without `response_class` it sends **JSON Lines** (`application/jsonl`), validating each item against
+the item type of the return annotation (`-> AsyncIterable[Item]`). `response_class=EventSourceResponse`
+sends SSE ([below](#server-sent-events)), and a `StreamingResponse` subclass sends the yielded bytes.
+JSON Lines needs FastAPI's default response class: with a `default_response_class` on the app or the
+router (`JSONResponse` and `ORJSONResponse` alike), every generator endpoint without its own
+`response_class` answers `500` (`TypeError: ... async_generator ...` in the log).
+
+```python
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+
+app = FastAPI()
+
+
+class CSVResponse(StreamingResponse):
+    media_type = "text/csv"
+
+
+async def existing_report(report_id: int) -> int:
+    if report_id != 1:  # runs before the response starts
+        raise HTTPException(status_code=404, detail="Unknown report")
+    return report_id
+
+
+@app.get("/reports/{report_id}", response_class=CSVResponse)
+async def report_csv(
+    report_id: Annotated[int, Depends(existing_report)],
+) -> AsyncIterator[bytes]:
+    yield b"id,total\n"
+    yield f"{report_id},0\n".encode()
+```
+
+- **Without `response_class`, raw output is not raw.** A generator that yields `bytes` or `str` (a CSV
+  export) is sent as JSON Lines: each chunk becomes a quoted JSON string with its newline escaped,
+  status `200`. Binary bytes fail after the headers: `200`, empty body, and in the log
+  `UnicodeDecodeError` (no return annotation) or `PydanticSerializationError`
+  (`-> AsyncIterator[bytes]`). `response_class=StreamingResponse` itself sends no
+  `Content-Type`; subclass it with `media_type` as above.
+- **The whole handler body runs after the `200` headers.** An `HTTPException` before the first
+  `yield` gives `200`, an empty body and a cut connection, for JSON Lines, `fastapi.sse` and raw
+  bytes alike. Checks that must produce a 4xx go into a dependency, which runs before the response
+  starts. A returned `StreamingResponse` can still validate in the handler body before returning.
+- A JSON Lines item that fails validation ends the stream after the items before it: `200`, cut
+  connection, `ResponseValidationError` in the log.
+- FastAPI awaits after every item, so a generator endpoint that never awaits stops after a
+  disconnect instead of hanging the process. The cancellation then lands in FastAPI's code while the
+  generator is parked at its `yield`, and its `finally` runs only at the next garbage collection:
+  always for a generator that never awaits, and in 0-8 of 20 disconnects per run for one that
+  awaits `asyncio.sleep(0)` per item, depending on when the client leaves (asyncio and uvloop).
+  Release resources from a `yield` dependency.
+- A `scope="function"` dependency has already exited when the body starts
+  ([fastapi-basics](fastapi-basics.md#dependencies-with-yield)).
+- Use a generator endpoint when the checks fit into dependencies (typed records, simple exports).
+  Return a `StreamingResponse` when the handler decides the status after doing work.
 
 ## Server-Sent Events
 
@@ -107,8 +170,9 @@ async def events(request: Request) -> EventSourceResponse:
   generator that never awaits does not hang the server, because FastAPI awaits between events
   itself. Event ids and `Last-Event-ID` handling are your job with either.
 - With `fastapi.sse`, the generator's `finally` runs promptly when a client that was keeping up
-  disconnects. When the client goes away while the stream is blocked on a full send buffer (large
-  events, slow or stalled reader), the server logs `Exception in ASGI application`
+  disconnects while the generator waits on its own `await` (otherwise see
+  [Generator endpoints](#generator-endpoints)). When the client goes away while the stream is
+  blocked on a full send buffer (large events, slow or stalled reader), the server logs `Exception in ASGI application`
   (`anyio.BrokenResourceError`) and the generator is not closed: its `finally` had not run 20 s
   later. Release anything that matters (subscriptions, locks) from a `yield` dependency rather
   than from the generator's `finally`.
@@ -117,7 +181,9 @@ async def events(request: Request) -> EventSourceResponse:
   client disconnects or the generator ends; the generator is not cancelled. Run with
   `--timeout-graceful-shutdown N`: the stream is then cancelled after N seconds. Without the flag
   the orchestrator ends the wait with SIGKILL. `sse-starlette` watches for the shutdown itself
-  and ends its streams at once.
+  and ends its streams at once. `fastapi run` (fastapi-cli 0.0.32) has no such flag: with one
+  `fastapi.sse` client connected it was still running 10 s after SIGTERM and stopped only when the
+  client left. Serve streaming apps with `uvicorn` and the flag.
 - An event stream has no end. Clients (`EventSource`) reconnect automatically and send
   `Last-Event-ID`; `sse-starlette` does nothing with it. Give events ids, read
   `request.headers.get("last-event-id")`, and resume from it yourself.
@@ -127,10 +193,12 @@ async def events(request: Request) -> EventSourceResponse:
 - A client that stays connected but stops reading blocks the generator in `send` indefinitely
   (`send_timeout` defaults to `None`). Pass `EventSourceResponse(..., send_timeout=seconds)`: the
   stream then ends with `SendTimeoutError` and the generator is closed (`finally` runs).
-- **An event generator must suspend on its own `await` in every iteration** (waiting for the next
-  event does that naturally). A generator that yields in a loop without awaiting is never
-  cancelled after the client disconnects, because `send` no longer suspends: an endless one then
-  spins on the event loop forever and the whole process stops answering requests.
+- **With `sse-starlette` (or a returned `StreamingResponse`), an event generator must suspend on its
+  own `await` in every iteration** (waiting for the next event does that naturally). A generator
+  that yields in a loop without awaiting is never cancelled after the client disconnects, because
+  `send` no longer suspends: an endless one then spins on the event loop forever and the whole
+  process stops answering requests (sse-starlette 3.5, asyncio and uvloop). `fastapi.sse` and other
+  generator endpoints do not hang this way.
 
 ## WebSockets
 
@@ -141,6 +209,11 @@ async def events(request: Request) -> EventSourceResponse:
   raises `WebSocketDisconnect(code=1006)`. The first `receive_*` after the client left raises
   `WebSocketDisconnect` with the client's close code, a second one `WebSocketDisconnected`. Catch
   `WebSocketDisconnect` around the receive loop; do not treat it as an error.
+- `async for data in websocket.iter_text()` ends quietly only when the disconnect arrives during
+  a receive. A send to a client that already left raises `WebSocketDisconnect(1006)` out of the
+  loop body: code after the loop never runs (every run, on uvicorn's `websockets`,
+  `websockets-sansio` and `wsproto`, after a clean close or an abort), and uvicorn logs
+  `Exception in ASGI application`. Unregister the connection in `finally`.
 - A WebSocket handler is one long-lived coroutine. Blocking calls inside it stall the whole
   process like in any `async def` handler, and there is no threadpool fallback: a `def` WebSocket
   handler runs its body on the event loop and then fails with
@@ -175,7 +248,8 @@ async def events(request: Request) -> EventSourceResponse:
   `Exception in ASGI application` with a `CancelledError`), and
   a crash or SIGKILL (Kubernetes after `terminationGracePeriodSeconds`) loses them outright. There is no
   retry in any case. Use them for work whose loss is acceptable. For anything else, write a job
-  row or publish a message inside the request's transaction and let a worker pick it up.
+  or outbox row inside the request's transaction and hand it to a worker after the commit
+  ([Long-running work](#long-running-work)).
 - A background task that uses the request's database session works, silently; it holds a pool
   connection for as long as that session's transaction is open
   ([sqlalchemy-async](sqlalchemy-async.md#transactions)).
@@ -234,6 +308,15 @@ async def enqueue(job_id: str) -> None:
   worker process (queue consumer, scheduler). The request's own process is the wrong place: a
   fire-and-forget task dies with the worker, and a `BackgroundTasks` entry, although it survives
   the client's disconnect, has no durability against a crash, a kill, or a task cancellation.
+- When the job row lives in a database, commit it **before** enqueuing the job id. Enqueued
+  inside the transaction, a worker that starts at once finds no row: it read `None` for a job
+  committed 50 ms later and for a job whose request rolled back (in-process queue, SQLite). After
+  the commit it saw the row. Publishing after the commit leaves a loss window: when the publish
+  fails, the row stays `queued` and no message exists. Close it with an outbox row written in the
+  same transaction and a dispatcher that retries the publish, or with workers that also poll for
+  `queued` rows (both picked up the job in the failure case). A job reached both ways runs twice
+  unless the worker claims it atomically (`UPDATE ... SET state = 'running' WHERE id = :id AND
+  state = 'queued'`) and runs it only when exactly one row changed: read-then-run ran it twice.
 - Make submission idempotent (client-supplied key or content hash) because clients retry `202`
   requests that timed out on the way back.
 - Progress and completion can be pushed over SSE or WebSocket, but the status endpoint must exist
@@ -248,8 +331,15 @@ async def enqueue(job_id: str) -> None:
 - Agent streams a long export from a request-scoped session without committing first - the connection is held for the whole stream.
 - Agent hand-rolls SSE with `StreamingResponse` - no `X-Accel-Buffering`, nginx batches or swallows the events.
 - Agent gives SSE events no ids - reconnecting clients lose or repeat events.
-- Agent writes an endless event generator that never awaits - after one client disconnects the loop spins and the service hangs.
-- Agent adds an SSE endpoint with `fastapi.sse` or `StreamingResponse` and leaves the uvicorn command unchanged - with one client connected the server no longer stops on SIGTERM; add `--timeout-graceful-shutdown`.
+- Agent writes an endless generator that never awaits for `sse-starlette` or a returned `StreamingResponse` - after one client disconnects the loop spins and the service hangs.
+- Agent adds an SSE endpoint with `fastapi.sse` or `StreamingResponse` and leaves the uvicorn command unchanged, or serves it with `fastapi run` - with one client connected the server no longer stops on SIGTERM; run uvicorn with `--timeout-graceful-shutdown`.
+- Agent writes a generator handler that yields bytes or text without `response_class` - FastAPI sends JSON Lines; the CSV arrives JSON-quoted and binary data is cut off, both with `200`; under a `default_response_class` on the app or router every such endpoint answers `500` instead.
+- Agent raises `HTTPException` in a generator endpoint before the first `yield` - the client gets `200` and an empty body; check in a dependency.
+- Agent sets `response_class=StreamingResponse` on a generator endpoint - no `Content-Type`; use a subclass with `media_type`.
+- Agent releases resources in the `finally` of a generator endpoint - after a disconnect it can wait for the next garbage collection.
+- Agent puts cleanup after an `async for ... in websocket.iter_text()` loop - a send to a client that already left raises out of the loop; the cleanup never runs and the connection stays registered.
+- Agent enqueues a job before the transaction that writes its row commits - the worker can run first and find no row, and a request that rolls back still enqueues.
+- Agent commits the job row and then publishes with nothing that retries - a failed publish leaves the job `queued` forever; use an outbox row or a polling worker that claims jobs with a conditional `UPDATE`, or the job runs twice.
 - Agent releases a subscription in the `finally` of a `fastapi.sse` generator - it does not run when a stalled client disconnects; release it in a `yield` dependency.
 - Agent passes `send_timeout` to `fastapi.sse.EventSourceResponse` - `TypeError`; only `sse-starlette` has it.
 - Agent leaves `send_timeout` unset - a client that stops reading pins a generator forever.

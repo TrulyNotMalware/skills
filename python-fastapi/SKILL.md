@@ -2,15 +2,15 @@
 name: python-fastapi
 description: >
   Conventions and pitfalls for Python + FastAPI backends (Pydantic v2, SQLAlchemy 2 async, pytest).
-  Use when writing, reviewing, refactoring, or debugging FastAPI code: app factory and lifespan,
-  Depends, yield dependencies and overrides, routing, request and response models, def vs async def
-  and the threadpool, middleware, Pydantic models, validators and pydantic-settings, SQLAlchemy
-  AsyncSession, transactions, connection pools and MissingGreenlet, asyncio tasks, cancellation and
-  timeouts, exception handlers, streaming, SSE, WebSockets, background jobs, httpx, JWT auth, CORS,
-  logging, metrics, tracing, health checks, Kafka (aiokafka), Redis and arq, tests (pytest-asyncio,
-  TestClient, AsyncClient, DB fixtures), pyproject, ruff, mypy and uvicorn. Also use when FastAPI
-  "silently does the wrong thing" (a write that is not committed, startup code that never runs, a
-  handler that blocks every request, a test that passes while the real server fails). Not for
+  Use when writing, reviewing, refactoring, or debugging FastAPI code: lifespan, Depends and yield
+  dependencies, routing, request and response models, def vs async def, middleware, Pydantic
+  validators and settings, SQLAlchemy AsyncSession, transactions, MissingGreenlet, pagination,
+  Alembic migrations, asyncio tasks, cancellation and timeouts, exception handlers, streaming,
+  generator endpoints and JSON Lines, SSE, WebSockets, background jobs, httpx and retries, JWT auth,
+  CORS, logging, metrics, tracing, health checks, Kafka (aiokafka), Redis and arq, tests
+  (pytest-asyncio, TestClient, AsyncClient, DB fixtures), pyproject, uv, ruff, mypy, uvicorn and
+  fastapi run. Also use when FastAPI "silently does the wrong thing" (a write that is not committed,
+  a handler that blocks every request, a test that passes while the real server fails). Not for
   Django, Flask, or data-science notebooks.
 ---
 
@@ -25,14 +25,14 @@ cases. Read the matching reference file before editing that area.
 
 ## Target versions
 
-Verified 2026-09-30 by running code on these versions. Version-bound statements in this skill and
-its references are tagged `(FastAPI 0.142)` or similar; when the project upgrades, re-check those
-first.
+Verified 2026-09-30 by running code on these versions, extended 2026-10-13. Version-bound
+statements in this skill and its references are tagged `(FastAPI 0.142)` or similar; when the
+project upgrades, re-check those first.
 
 | Component | Baseline | Notes |
 |---|---|---|
 | Python | 3.14 | Lazy annotations (PEP 649); `asyncio.get_event_loop()` no longer creates a loop |
-| FastAPI | 0.142.x | Starlette 1.7; `Depends(scope=...)` from 0.121; native OpenTelemetry (`telemetry=`) |
+| FastAPI | 0.142.x | Starlette 1.7; `Depends(scope=...)` from 0.121; native OpenTelemetry (`telemetry=`), whose exporter auto-setup needs `FASTAPI_OTEL_AUTO_CONFIGURE=true` from 0.143; fastapi-cli 0.0.32 |
 | Pydantic | 2.13.x | pydantic-settings 2.15 |
 | SQLAlchemy | 2.1.x async | asyncpg 0.31; `greenlet` only through the `asyncio` extra |
 | Server | uvicorn 0.54 | `--workers` spawns, it does not fork |
@@ -40,7 +40,8 @@ first.
 | Tests | pytest 9.1, pytest-asyncio 1.4 | anyio 4.15 underneath |
 | Auth | PyJWT 2.15, bcrypt 5.0 | passlib 1.7.4 does not work with bcrypt 5 |
 | Messaging, cache | aiokafka 0.14, redis 8.1, arq 0.25 | the arq worker does not start on Python 3.14 |
-| Tooling | ruff 0.16, mypy 2.3 | |
+| Tooling | ruff 0.16, mypy 2.3, uv 0.13 | |
+| Where the project uses them | Alembic 1.20, tenacity 9.2, SQLModel 0.0.48, asyncer 0.0.18 | |
 
 The project's own files win over this table. Read `pyproject.toml`, the lock or requirements files,
 and the root `AGENTS.md`/`CLAUDE.md` before changing anything version- or convention-related.
@@ -51,6 +52,12 @@ Check the installed versions (`pip list`), not the declared ranges.
 1. **Read the project's existing patterns first.** Find one existing router, service, model and
    test and follow their style (dependency aliases, error shape, settings access, test client).
    Consistency with the codebase beats this skill's defaults.
+   FastAPI ships its own agent skill inside the package (`fastapi/.agents/skills/fastapi/`, from
+   0.133.1), matched to the installed version; `python -c "import fastapi, pathlib;
+   print(pathlib.Path(fastapi.__file__).with_name('.agents'))"` prints where it is. Use it for
+   current API shapes and style. This
+   skill adds what fails silently; where the two differ on behavior (`fastapi run` for a service
+   that streams, `def` as the default for dependencies), follow the measured statement here.
 2. **Open the relevant reference** from the table below before writing code in that area.
 3. **Verify through the ASGI stack, not around it.** Dependency resolution, response filtering,
    parameter sources, and cleanup order are invisible to tests that call the handler function
@@ -63,9 +70,13 @@ Check the installed versions (`pip list`), not the declared ranges.
 When **diagnosing** (unexpected `422`, a value that is not persisted, a hanging service, startup
 state that is missing, flaky tests), gather evidence before editing: the full traceback from the
 server log, the exact request, the installed versions, and whether the code runs on the event loop
-or in a worker thread. Report the broken mechanism, the concrete reason, the minimal fix, and how
-you verified it. Do not add `try/except`, retries, or `def` in place of `async def` just to make a
-symptom disappear.
+or in a worker thread. To find what blocks the loop, run the server with `PYTHONASYNCIODEBUG=1`:
+asyncio logs each step that holds the loop longer than 100 ms and its duration, under the stdlib
+loop and uvloop alike. The task it names is uvicorn's request cycle, not the route, so match the
+time against the access log. A `dictConfig` with `disable_existing_loggers=True` silences it unless
+the config lists the `asyncio` logger. Report the broken mechanism, the concrete reason, the minimal
+fix, and how you verified it. Do not add `try/except`, retries, or `def` in place of `async def`
+just to make a symptom disappear.
 
 ## Always-on rules
 
@@ -93,19 +104,19 @@ symptom disappear.
 
 | Task touches... | Read |
 |---|---|
-| App factory, `lifespan`, `Depends` and `yield` dependencies, route order and trailing slashes, response filtering, `def` vs `async def`, middleware, context variables, annotations | [reference/fastapi-basics.md](reference/fastapi-basics.md) |
-| Pydantic v2 models, validators, coercion and strict mode, PATCH with `exclude_unset`, aliases, serialization, request body shapes, `BaseSettings` and environment variables | [reference/pydantic-models.md](reference/pydantic-models.md) |
-| Async engine and session, commit and rollback, savepoints, connection pool, concurrent queries, relationship loading, `MissingGreenlet`, server defaults and `onupdate`, `Enum`/`JSONB`/datetime columns | [reference/sqlalchemy-async.md](reference/sqlalchemy-async.md) |
-| Background tasks and task ownership, cancellation, timeouts, `gather` vs `TaskGroup`, bounding fan-out, `to_thread` and context variables, client disconnects, shutdown, Python 3.14 loop API | [reference/asyncio-concurrency.md](reference/asyncio-concurrency.md) |
+| App factory, `lifespan`, `Depends` and `yield` dependencies, route order and trailing slashes, router prefixes, `app.frontend()`, response filtering and returned instances, `ORJSONResponse`, `def` vs `async def`, threadpool size, calling async code from `def`, middleware, context variables, annotations | [reference/fastapi-basics.md](reference/fastapi-basics.md) |
+| Pydantic v2 models, validators, coercion and strict mode, SQLModel table models, PATCH with `exclude_unset`, aliases, serialization, NaN, shared serializers, request body shapes, `BaseSettings`, environment variables, `NoDecode`, URL settings | [reference/pydantic-models.md](reference/pydantic-models.md) |
+| Async engine and session, commit and rollback, savepoints, connection pool, concurrent queries, relationship loading, pagination, `MissingGreenlet`, server defaults and `onupdate`, `Enum`/`JSONB`/datetime columns, Alembic migrations and autogenerate | [reference/sqlalchemy-async.md](reference/sqlalchemy-async.md) |
+| Background tasks and task ownership, cancellation, timeouts, `gather` vs `TaskGroup`, bounding fan-out, `to_thread`, executors and context variables, client disconnects, shutdown, Python 3.14 loop API | [reference/asyncio-concurrency.md](reference/asyncio-concurrency.md) |
 | Exception handlers and matching, error body shape, `422` input echo, status codes without bodies, error headers | [reference/web-errors.md](reference/web-errors.md) |
-| `StreamingResponse`, Server-Sent Events, WebSockets, `BackgroundTasks`, long-running jobs (`202` + status endpoint) | [reference/streaming-background.md](reference/streaming-background.md) |
-| Calling other services with `httpx`: client lifecycle, cookie jar, timeouts (per read, pool), exception hierarchy, retries, redirects, streaming pass-through | [reference/http-clients.md](reference/http-clients.md) |
+| `StreamingResponse`, generator endpoints and JSON Lines, Server-Sent Events, WebSockets and disconnect cleanup, `BackgroundTasks`, long-running jobs (`202` + status endpoint, enqueue after commit) | [reference/streaming-background.md](reference/streaming-background.md) |
+| Calling other services with `httpx`: client lifecycle, cookie jar, timeouts (per read, pool), exception hierarchy, retries and tenacity, redirects, streaming pass-through | [reference/http-clients.md](reference/http-clients.md) |
 | Bearer tokens and JWT verification, FastAPI security schemes, scopes and authorization, password hashing (bcrypt 5, passlib), CORS and CSRF, proxy headers | [reference/security.md](reference/security.md) |
-| Logging configuration and uvicorn loggers, structlog context, Prometheus labels and multi-worker registries, OpenTelemetry (native and contrib), health and readiness endpoints | [reference/config-observability.md](reference/config-observability.md) |
+| Logging configuration and uvicorn loggers, structlog context, Prometheus labels, where to measure, multi-worker registries, OpenTelemetry (native and contrib, 0.143 auto-setup), health and readiness endpoints | [reference/config-observability.md](reference/config-observability.md) |
 | Kafka with `aiokafka`: producer lifecycle and `send` futures, idempotence, consumer groups and offsets, commits and redelivery, heartbeats and blocking, poison messages, transactional outbox | [reference/kafka-aiokafka.md](reference/kafka-aiokafka.md) |
 | Redis with `redis.asyncio`: client defaults, timeouts and retries, bytes vs str, TTL pitfalls, locks, pipelines, rate limits; job queues (`arq`) | [reference/redis-cache-queues.md](reference/redis-cache-queues.md) |
 | pytest-asyncio modes and loop scopes, `TestClient` vs `AsyncClient`, lifespan in tests, `dependency_overrides`, database fixtures with rollback, what to assert | [reference/testing.md](reference/testing.md) |
-| `pyproject.toml`, extras and lock files, ruff (`ASYNC`, `FAST`, `RUF006`), mypy with the pydantic plugin, uvicorn workers and proxy flags, container basics | [reference/packaging-tooling.md](reference/packaging-tooling.md) |
+| `pyproject.toml`, extras and dependency groups, lock files and uv (`--locked`, `--frozen`, `uv run`), ruff (`ASYNC`, `FAST`, `RUF006`), mypy with the pydantic plugin, uvicorn workers and proxy flags, `fastapi run`, container basics | [reference/packaging-tooling.md](reference/packaging-tooling.md) |
 
 ## Gotchas
 
@@ -134,12 +145,25 @@ own, longer list.
   field echoes the password back. See [web-errors](reference/web-errors.md#validation-errors).
 - Agent starts work with `asyncio.create_task` and drops the reference - failures are unobserved,
   and under SIGTERM the task vanishes without `finally`.
-- Agent writes an endless streaming generator that never awaits - after one client disconnects the
-  event loop spins and the service stops answering.
+- Agent returns a `StreamingResponse` (or an sse-starlette response) over an endless generator that
+  never awaits - after one client disconnects the event loop spins and the service stops answering.
+- Agent writes a generator endpoint (a handler that yields) without a `response_class` - the bytes
+  are sent as JSON Lines, or every request fails with `500` when the app or router sets a
+  `default_response_class`; an `HTTPException` before the first `yield` arrives as `200` with an
+  empty body. See [streaming-background](reference/streaming-background.md#generator-endpoints).
+- Agent serves `fastapi.sse` or returned `StreamingResponse` endpoints through `fastapi run` - on
+  SIGTERM it waits for each open stream to end, for an endless one until SIGKILL; it has no
+  `--timeout-graceful-shutdown`. Start uvicorn directly.
+- Agent retries httpx calls on `ConnectionError`, `TimeoutError` or `OSError` (as popular guides
+  suggest) - httpx exceptions derive from none of them; nothing is retried.
+  See [http-clients](reference/http-clients.md#retries).
 - Agent sets `timeout=10` on an httpx call to bound it - the timeout is per read; a dripping
   response runs as long as it likes.
 - Agent combines `allow_origins=["*"]` with `allow_credentials=True` - any origin gets credentialed
   access; nothing rejects it.
+- Agent points Alembic's `target_metadata` at `Base.metadata` without importing the model modules -
+  autogenerate writes a migration that drops every table.
+  See [sqlalchemy-async](reference/sqlalchemy-async.md#migrations-alembic).
 - Agent uses a session- or module-scoped engine with pytest-asyncio's default loop scopes -
   intermittent asyncpg errors that do not mention event loops.
 - Agent tests only by calling handler functions, or trusts a green in-process test for behavior
@@ -151,6 +175,7 @@ own, longer list.
 
 When bumping the target versions: update the table above, then grep this directory for version tags
 (`FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `pytest-asyncio`,
-`PyJWT`, `bcrypt`, `httpx2`, `aiokafka`, `redis 8`, `arq`, `ruff 0.`, `uvicorn 0.`) and re-verify
+`PyJWT`, `bcrypt`, `httpx2`, `aiokafka`, `redis 8`, `arq`, `ruff 0.`, `uvicorn 0.`, `fastapi-cli`,
+`uv 0.`, `Alembic`, `alembic`, `tenacity`, `SQLModel`, `sqlmodel`, `asyncer`) and re-verify
 each tagged statement by running it. The change history is kept outside this directory, in the
 author's wiki.
