@@ -52,7 +52,7 @@ a mod runs in the harness and refuses, rewrites or displays tool calls.
 | Mod | What it does |
 | --- | --- |
 | [wiki-guard](mods/wiki-guard) | Enforces a personal wiki's edit rules at tool-call time: `raw/` is immutable, `log.md` is append-only, public pages never link local-only pages, commits wait for the linter. |
-| [infra-pane](mods/infra-pane) | A live pane and status line for a local infra testbed: compose services, the OrbStack k8s cluster, Tailscale, with stop buttons and toggles. |
+| [infra-pane](mods/infra-pane) | A live pane and status line for a local infra testbed: compose services, the OrbStack k8s cluster, Tailscale, with start and stop buttons and toggles. |
 | [infra-preflight](mods/infra-preflight) | Refuses `docker compose up` on an infra service while Tailscale is down or the service's `BIND_IP` has drifted from the Tailscale address. |
 
 They are bound to the author's machine (`~/workspace/llm_wiki`, `~/infra`, Tailscale, OrbStack)

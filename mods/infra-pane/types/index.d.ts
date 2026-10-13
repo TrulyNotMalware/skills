@@ -8,12 +8,24 @@ export type InfraService = {
   running: boolean
 }
 
-/** A compose project that does not live under ~/infra. */
+/** A compose project that is not one of the ~/infra service directories. */
 export type InfraOther = {
   name: string
   status: string
   running: boolean
   dir: string
+}
+
+/** A container that belongs to no compose project (`docker run`), so `docker compose ls` never lists it. */
+export type InfraContainer = {
+  name: string
+  image: string
+  /** docker's State: `running`, `restarting`, `paused`, `exited`, `created`, `dead`. */
+  state: string
+  /** docker's Status text: `Up 20 minutes`, `Exited (0) 4 hours ago`. */
+  status: string
+  /** Up in any form: running, restarting or paused. */
+  running: boolean
 }
 
 export type InfraTailscale = {
@@ -72,6 +84,8 @@ export type InfraSnapshot = {
   dockerError?: string
   infra: InfraService[]
   others: InfraOther[]
+  /** Containers outside any compose project (k8s pods' containers left out); a snapshot kept from before a reload may lack it. */
+  containers?: InfraContainer[]
   tailscale: InfraTailscale
   /** Whether something listens on 127.0.0.1:8480 (the wiki read-only web). */
   wikiServe: boolean
@@ -86,6 +100,8 @@ declare module 'claude-code' {
       snapshot: InfraSnapshot | null
       /** Namespaces whose full pod list is shown in the pane. */
       expanded: string[]
+      /** ~/infra services whose `docker compose up -d` is in flight: their rows read `starting…` and have no button. */
+      starting: string[]
     }
   }
 }

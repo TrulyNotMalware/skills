@@ -1,7 +1,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { InfraK8s, InfraK8sNamespace, InfraK8sPod, InfraK8sPodKind, InfraOther, InfraService, InfraSnapshot, InfraTailscale, InfraWikiMode } from '../types'
+import type {
+  InfraContainer,
+  InfraK8s,
+  InfraK8sNamespace,
+  InfraK8sPod,
+  InfraK8sPodKind,
+  InfraOther,
+  InfraService,
+  InfraSnapshot,
+  InfraTailscale,
+  InfraWikiMode,
+} from '../types'
 
 const PANE = 'infra'
 const POLL_MS = 20_000
@@ -11,6 +22,7 @@ const WIKI_SERVE_PORT = 8480
 const WIKI_SERVE_PLIST = 'Library/LaunchAgents/com.junho.wiki-serve.plist'
 const snapshot = atom({ plugin: 'infra-pane', key: 'snapshot' } as const, null)
 const expanded = atom({ plugin: 'infra-pane', key: 'expanded' } as const, [])
+const starting = atom({ plugin: 'infra-pane', key: 'starting' } as const, [])
 
 type Engine = EngineInterface
 type Ran = { exitCode: number; stdout: string; stderr: string }
@@ -66,6 +78,21 @@ function parseCompose(stdout: string): ComposeRow[] {
 function isRunning(status: string): boolean {
   const match = /\brunning\((\d+)\)/.exec(status)
   return match !== null && Number(match[1]) > 0
+}
+
+// `docker compose ls` only knows containers that carry a compose project label; a plain `docker run` has none.
+// One tab-separated line per container: Go template output, and names, states and image refs hold no tabs.
+const PS_FORMAT = ['{{.Names}}', '{{.State}}', '{{.Status}}', '{{.Image}}', '{{.Label "com.docker.compose.project"}}', '{{.Label "io.kubernetes.pod.namespace"}}'].join('\t')
+
+/** The containers outside any compose project; a k8s pod's container (namespace label) is the k8s section's. */
+function parseContainers(stdout: string): InfraContainer[] {
+  const containers: InfraContainer[] = []
+  for (const line of stdout.split('\n')) {
+    const [name, state, status, image, project, namespace] = line.split('\t')
+    if (!name || !state || project || namespace) continue
+    containers.push({ name, image: image ?? '', state, status: status ?? state, running: state === 'running' || state === 'restarting' || state === 'paused' })
+  }
+  return containers.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function parseTailscale(stdout: string): InfraTailscale {
@@ -146,9 +173,10 @@ async function collectK8s($: Engine): Promise<InfraK8s> {
 
 async function collect($: Engine): Promise<InfraSnapshot> {
   const infra = await infraDir($)
-  const [at, compose, tailscale, serve, dirs, k8s] = await Promise.all([
+  const [at, compose, ps, tailscale, serve, dirs, k8s] = await Promise.all([
     $.clock.now(),
     run($, ['docker', 'compose', 'ls', '-a', '--format', 'json'], 10_000),
+    run($, ['docker', 'ps', '-a', '--format', PS_FORMAT], 10_000),
     run($, [TAILSCALE, 'status', '--json'], 5_000),
     run($, ['lsof', '-nP', `-iTCP:${WIKI_SERVE_PORT}`, '-sTCP:LISTEN'], 5_000),
     serviceDirs($, infra),
@@ -169,7 +197,10 @@ async function collect($: Engine): Promise<InfraSnapshot> {
       running: project?.running ?? false,
     }
   })
-  const others: InfraOther[] = projects.filter(p => !p.dir.startsWith(`${infra}/`))
+  // every project no service row claimed, under ~/infra too (a nested or a compose.yaml-only folder, one added since
+  // the catalog was cached): a prefix test on ~/infra dropped those from both lists
+  const claimed = new Set(infraServices.flatMap(s => (s.project ? [s.project] : [])))
+  const others: InfraOther[] = projects.filter(p => !claimed.has(p.name))
   const mode = await wikiMode($, serve.exitCode === 0)
   return {
     at,
@@ -177,6 +208,7 @@ async function collect($: Engine): Promise<InfraSnapshot> {
     ...(compose.exitCode === 0 ? {} : { dockerError: compose.stderr.trim().split('\n')[0] ?? '' }),
     infra: infraServices,
     others,
+    containers: ps.exitCode === 0 ? parseContainers(ps.stdout) : [],
     tailscale: tailscale.exitCode === 0 ? parseTailscale(tailscale.stdout) : { state: 'unknown' },
     wikiServe: serve.exitCode === 0,
     wikiMode: mode,
@@ -204,7 +236,12 @@ function summary(snap: InfraSnapshot): string {
   const k8sErrors = snap.k8s.namespaces.reduce((n, ns) => n + podsOf(ns, 'error').length, 0)
   const k8s = snap.k8s.enabled ? (snap.k8s.reachable ? `on${k8sErrors > 0 ? `, ${k8sErrors} error pod${k8sErrors > 1 ? 's' : ''}` : ''}` : 'on, API not answering') : 'off'
   const wiki = { off: 'off', public: 'ON (public only)', full: 'ON (FULL: local-only areas visible to every tailnet device)', unknown: 'ON (mode unknown)' }[snap.wikiMode]
-  return `infra: ${up.length > 0 ? `up: ${up.join(', ')}` : 'all services off'}${docker}; tailscale ${snap.tailscale.state}; wiki-serve ${wiki}; k8s ${k8s}.`
+  const elsewhere = [
+    ...snap.others.filter(o => o.running).map(o => `${o.name} (compose)`),
+    ...(snap.containers ?? []).filter(c => c.running).map(c => `${c.name} (container)`),
+  ]
+  const also = elsewhere.length > 0 ? ` Also up outside ~/infra: ${elsewhere.join(', ')}.` : ''
+  return `infra: ${up.length > 0 ? `up: ${up.join(', ')}` : 'all services off'}${docker}; tailscale ${snap.tailscale.state}; wiki-serve ${wiki}; k8s ${k8s}.${also}`
 }
 
 let polling: Promise<InfraSnapshot | undefined> | undefined
@@ -233,6 +270,62 @@ async function stop($: Engine, svc: string): Promise<string> {
   $.ui.toast(text)
   await poll($)
   return text
+}
+
+/** BIND_IP from a service's .env; only that one line is read into a value, nothing else leaves the file. */
+async function bindIpOf($: Engine, envPath: string): Promise<string | undefined> {
+  let text: string
+  try {
+    text = await $.fs.read(envPath)
+  } catch {
+    return undefined
+  }
+  return /^BIND_IP=["']?([^"'\s#]+)/m.exec(text)?.[1]
+}
+
+// The services whose `up -d` is in flight. The set is the guard, taken with no await between the test and the add;
+// the atom is its copy for the drawing. The session's state outlives a reload and the set does not, so session.start
+// copies it again: a start the reload dropped does not leave its row without a button.
+const inFlight = new Set<string>()
+async function showStarting($: Engine): Promise<void> {
+  await update($, starting, () => [...inFlight].sort())
+}
+
+/**
+ * `docker compose -f ~/infra/<svc>/docker-compose.yml up -d`, for a service folder of ~/infra and nothing else.
+ * It makes infra-preflight's two checks itself, as that guard hooks the Bash tool and never sees `$.process.run`:
+ * Tailscale Running (the data ports bind to its IP), and the service's BIND_IP that IP.
+ */
+async function start($: Engine, svc: string): Promise<string> {
+  const infra = await infraDir($)
+  const say = (text: string): string => {
+    $.ui.toast(text)
+    return text
+  }
+  const known = await serviceDirs($, infra)
+  if (!known.includes(svc)) return say(`infra: ${svc} is not a compose service of ~/infra (${known.join(', ')}).`)
+  if (inFlight.has(svc)) return say(`infra: ${svc} is already starting.`)
+  inFlight.add(svc)
+  try {
+    await showStarting($)
+    const status = await run($, [TAILSCALE, 'status', '--json'], 5_000)
+    const tailscale: InfraTailscale = status.exitCode === 0 ? parseTailscale(status.stdout) : { state: 'unknown' }
+    if (tailscale.state !== 'Running')
+      return say(`infra: ${svc} not started: Tailscale is ${tailscale.state}, not Running, and the data ports bind to its IP. Run \`open -a Tailscale\`, then start again.`)
+    const bind = await bindIpOf($, `${infra}/${svc}/.env`)
+    if (bind && bind !== '127.0.0.1' && tailscale.ip && bind !== tailscale.ip)
+      return say(`infra: ${svc} not started: ${svc}/.env has BIND_IP=${bind}, this machine's Tailscale IP is ${tailscale.ip}. Run ~/infra/scripts/set-bind-ip, then start again.`)
+    $.ui.toast(`infra: starting ${svc}…`)
+    const ran = await run($, ['docker', 'compose', '-f', `${infra}/${svc}/docker-compose.yml`, 'up', '-d'], 300_000, infra)
+    return say(ran.exitCode === 0 ? `infra: ${svc} started.` : `infra: start ${svc} failed (exit ${ran.exitCode}): ${ran.stderr.trim().split('\n').pop() ?? ''}`)
+  } finally {
+    // a poll in flight may have asked docker before `up` returned: wait it out and poll again, and only then give
+    // the row back, so it never shows `start` over a service that is up
+    await polling
+    await poll($)
+    inFlight.delete(svc)
+    await showStarting($)
+  }
 }
 
 type WikiWant = 'on' | 'full' | 'off'
@@ -289,10 +382,15 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'infra',
       description: enabled
-        ? 'Local infra (~/infra): show the pane, `stop <svc|all>`, `wiki on|full|off` (on = public only), `k8s start|stop`'
+        ? 'Local infra (~/infra): show the pane, `start <svc…>`, `stop <svc|all>`, `wiki on|full|off` (on = public only), `k8s start|stop`'
         : 'Local infra pane (off; enable in /config)',
-      argumentHint: '[stop <svc|all> | wiki on|full|off | k8s start|stop]',
+      argumentHint: '[start <svc…> | stop <svc|all> | wiki on|full|off | k8s start|stop]',
     })
+    try {
+      await showStarting($)
+    } catch {
+      // the state refused the write: the rows keep what it held, and the pane and the polling below still start
+    }
     if (!enabled) {
       $.ui.status(undefined)
       try {
@@ -310,7 +408,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'infra' }, async ($, e) => {
     if (!enabled) return { text: OFF }
-    const [verb, target] = e.args.trim().split(/\s+/)
+    const [verb, target, ...more] = e.args.trim().split(/\s+/)
     if (verb === 'k8s') {
       if (target !== 'start' && target !== 'stop') return { text: 'infra: say `/infra k8s start` or `/infra k8s stop`.' }
       return { text: await k8s($, target) }
@@ -320,6 +418,12 @@ export const register: Register = (on, options) => {
       if (want !== 'on' && want !== 'full' && want !== 'off')
         return { text: 'infra: say `/infra wiki on` (public only), `/infra wiki full` (local-only areas too) or `/infra wiki off`.' }
       return { text: await wikiServe($, want) }
+    }
+    if (verb === 'start') {
+      if (!target) return { text: 'infra: say which service, e.g. `/infra start kafka` or `/infra start postgresql redis-cluster`.' }
+      const said: string[] = []
+      for (const svc of [target, ...more]) said.push(await start($, svc))
+      return { text: said.join('\n') }
     }
     if (verb === 'stop') {
       if (!target) return { text: 'infra: say which service, e.g. `/infra stop kafka` or `/infra stop all`.' }
@@ -341,6 +445,7 @@ export const register: Register = (on, options) => {
     }
     const snap = await read($, snapshot)
     const opened = await read($, expanded)
+    const coming = await read($, starting)
     if (snap === null) {
       return (
         <Box>
@@ -348,10 +453,16 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const running = snap.infra.filter(s => s.running)
-    const stopped = snap.infra.filter(s => !s.running)
+    // a service whose `up -d` is in flight is neither running nor off: a poll on the way may already count the first
+    // of its containers, and a stop button there would run stop_all against a project still coming up
+    const startingNow = snap.infra.filter(s => coming.includes(s.svc))
+    const running = snap.infra.filter(s => s.running && !coming.includes(s.svc))
+    const stopped = snap.infra.filter(s => !s.running && !coming.includes(s.svc))
     const othersRunning = snap.others.filter(o => o.running)
     const othersStopped = snap.others.filter(o => !o.running)
+    const containers = snap.containers ?? []
+    const containersUp = containers.filter(c => c.running)
+    const containersDown = containers.filter(c => !c.running)
     const tailscaleOk = snap.tailscale.state === 'Running'
     return (
       <Box flexDirection="column">
@@ -409,12 +520,23 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
 
-        {/* stopped: one dim line, names only */}
-        {stopped.length > 0 && (
-          <Text dimColor wrap="wrap">
-            {'  '}○ off: {stopped.map(s => s.svc).join(' · ')}
+        {/* `up -d` in flight: the row says so and has no button, start or stop, until it returns */}
+        {startingNow.map(s => (
+          <Text key={`row-${s.svc}`} color="warning" wrap="truncate">
+            {'  '}◐ {s.svc} starting…
           </Text>
-        )}
+        ))}
+
+        {/* stopped: one dim row each, with its start button (`up -d`).
+            No hotkey and no "start all": only what is needed is brought up. */}
+        {stopped.map(s => (
+          <Box key={`row-${s.svc}`}>
+            <Text dimColor wrap="truncate">
+              {'  '}○ {s.svc}{' '}
+            </Text>
+            <Button key={`start-${s.svc}`} label="start" plain dimColor onPress={() => void start($, s.svc)} />
+          </Box>
+        ))}
 
         {/* the OrbStack cluster: on/off with its toggle, then each namespace's pods */}
         <Box>
@@ -500,6 +622,24 @@ export const register: Register = (on, options) => {
         {othersStopped.length > 0 && (
           <Text dimColor wrap="wrap">
             {'  '}○ off: {othersStopped.map(o => o.name).join(' · ')}
+          </Text>
+        )}
+
+        {/* containers without a compose project (`docker run`): running bright, restarting or paused yellow, the rest dim */}
+        {containers.length > 0 && <Text dimColor>containers (no compose)</Text>}
+        {containersUp.map(c => (
+          <Box key={`container-${c.name}`}>
+            <Text color={c.state === 'running' ? 'success' : 'warning'} wrap="truncate">
+              {'  '}● {c.name}
+            </Text>
+            <Text dimColor wrap="truncate">
+              {' '}{c.status} ({c.image})
+            </Text>
+          </Box>
+        ))}
+        {containersDown.length > 0 && (
+          <Text dimColor wrap="wrap">
+            {'  '}○ off: {containersDown.map(c => c.name).join(' · ')}
           </Text>
         )}
 
