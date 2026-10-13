@@ -25,6 +25,35 @@ time; each comes from a recorded run.
   not isolate compile output either (inference, not observed); if collisions persist, serialize
   the commands or give each worker its own worktree.
 - **The coordinator runs the full build once, after all workers finish.**
+- **Revert checks run in a throwaway worktree, never in the tree a review lane is reading.** Proving
+  that each new test fails with its production hunk reverted means restoring base files and re-applying
+  the patch over and over; in the main tree that races a concurrent read-only review lane and any build.
+  Create a worktree at the base commit and reproduce the uncommitted state there: `git worktree add
+  --detach <dir> <base>`, then `git -C <dir> apply <absolute patch path>` (a relative path resolves inside
+  the worktree and fails), copy the git-ignored build settings (`gradle.properties`) by hand, and remember
+  that `git diff` omits untracked new files — append them with `git diff --no-index /dev/null <file>` or the
+  worktree silently lacks them. Run the revert-and-test loop there one Gradle run at a time, record
+  `git diff --stat` before the first revert and compare after every restore, and remove the worktree when
+  done: it is stale from the next edit in the main tree. (2026-10-11, a pull request on a Kotlin service: six
+  behavioural fixes verified this way while a code-reviewer lane read the main tree and Codex reviewed it.)
+- **The same holds for one agent, and for a tree that is not a repository.** Anything that reads the tree
+  while a fix is reverted is a concurrent reader. In the incident a background `test && build` chain started
+  next to an in-place revert loop reported the reverted file as a failing test and went on to build an image;
+  the image then had to be compared with the sources file by file (it matched). Without git, copy the tree and
+  loop there: `rsync -a --exclude .venv --exclude __pycache__ --exclude .env <tree>/ <copy>/`, then run the
+  tests from `<copy>` with the original interpreter. Leave secrets files out of the copy, and first confirm
+  that the tests import the copy: with an editable install a plain `import` resolved to the original tree,
+  and only the test runner's own path setting (pytest `pythonpath`) put the copy first. (2026-10-12, a Python
+  service outside version control; the copy procedure was run once: a revert in the copy failed its test
+  there while the original file stayed byte-identical.)
+- **An in-place revert loop also poisons bytecode caches (Python).** CPython validates a `.pyc` by the
+  source's mtime in whole seconds and its size. Restore a file of the same size within the same second as
+  the reverted write, and the next run still executes the reverted code. The mirror case: a revert written
+  in the same second as the cached original makes the reverted run execute the original, and the check
+  reports that the test pins nothing. `-B` on the reverted run avoids only the first case (it stops writing
+  bytecode, not reading it); a copy of the tree with its own caches avoids both. (Reproduced on Python
+  3.14.7 with fixed mtimes; in the incident a same-size revert that swapped two blocks, restored after a
+  sub-second test run, made the next full run fail until `__pycache__` was removed.)
 - **Verification that shares mutable state runs in sequence or is isolated.** Parallel probes
   sharing one flag file all broke; agents sharing one database used a table prefix each. Tests
   that change process-global state (Reactor hooks, the logging context) run in separate
@@ -50,6 +79,11 @@ time; each comes from a recorded run.
   decision.
 - Agent lets several workers build one tree at once - shared build output breaks and looks like
   flaky tests.
+- Agent runs revert checks in the tree a review lane is reading - the reviewer judges reverted code,
+  or a build picks up a half-restored file.
+- Agent runs an in-place revert loop in a Python tree and restores within the same second - the next
+  run executes the reverted bytecode and fails for no reason, or the reverted run executes the original
+  and the check says the test pins nothing.
 - Agent runs verification scripts that share a flag file or the same tables in parallel - the
   results corrupt each other.
 - Agent leaves worker reports only in `/tmp` - a reboot loses them.

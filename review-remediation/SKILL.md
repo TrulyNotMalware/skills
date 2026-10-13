@@ -58,7 +58,9 @@ right but wrong together. This skill is the order of work that catches those bef
 7. **Prove the tests pin the fix.** Revert the fix (or restore the old condition) and watch the
    new test fail; a test that passes either way pins nothing. Ask whether the test environment
    can see the defect at all (Evidence rules). Besides fakes, add one run of the real component
-   against a fake upstream (for example the real CLI against a fake model API).
+   against a fake upstream (for example the real CLI against a fake model API). Run the revert
+   loop in a copy of the tree, never in place, even when you work alone: a background build or
+   test run is a concurrent reader too. See [parallel-workers](reference/parallel-workers.md).
 8. **Report honestly.** "Done (unverified)" is *not done*: list it as open with what is needed
    to verify it. Keep measured facts and inferences in separate sections, especially in text
    that another agent or worker will act on; it treats everything in a "facts" list as measured.
@@ -71,8 +73,8 @@ right but wrong together. This skill is the order of work that catches those bef
 
 | Read | When |
 |---|---|
-| [interactions](reference/interactions.md) | A fix changes acknowledgement, retries, deduplication, transactions, persistence-context clearing, counters, or behavior in only some modes or profiles |
-| [parallel-workers](reference/parallel-workers.md) | Remediation or verification is split across subagents, worktrees or concurrent scripts |
+| [interactions](reference/interactions.md) | A fix changes acknowledgement, retries, attempt refunds or requeues, deduplication, transactions, persistence-context clearing, counters, or behavior in only some modes or profiles |
+| [parallel-workers](reference/parallel-workers.md) | Remediation or verification is split across subagents, worktrees or concurrent scripts, or you are about to run revert checks while anything else (a background build, a test run, a review lane) reads the tree |
 
 ## Evidence rules
 
@@ -88,15 +90,28 @@ right but wrong together. This skill is the order of work that catches those bef
   - An embedded database that shares the application's clock hides mismatches between
     database-generated and application-computed timestamps (zone-less columns, a production
     database in another time zone).
-  - A mocked transaction manager checks call order, not transaction boundaries.
+  - A mocked transaction manager checks call order, not transaction boundaries. It also never sets
+    `TransactionSynchronizationManager.isActualTransactionActive()`: a guard you add to a repository
+    method (refuse or require an active transaction) is invisible to a mocked-manager spec of its
+    caller. Pin the guard through the real caller with a real transaction manager, and check that the
+    spec fails with the guard removed (Spring; any guard that reads the synchronization state).
   - Tests that never start the application/DI context never test wiring; tests that commit per
     call model a boundary that production does not have.
   - An in-process test client is not a client on a real socket: it can re-raise server errors
     and wait for background work that a real client never waits for, and it accepted a 204
     response with a body on which the real server dropped the connection.
+  - A stub that returns a ready-made SDK response object skips the SDK's own response handling.
+    A structured-output `parse` helper validated the body inside the call, so a refusal that
+    carried text (anthropic 1.13 `messages.parse`) and an incomplete response with partial text
+    (openai 2.53 `responses.parse`) surfaced as schema errors before the caller could read the
+    stop reason or status. Stubbed tests could not see it; a test that drove the real client
+    over an in-memory transport did.
 - **When an old test fails after your fix, check its expected value before reverting the fix.**
   A test that pins the defect (for example `verify(exactly = 1)` on a resend) fails on the
   correct fix, and while it passes it tells the next reviewer the defect is intended.
+- **A gate you pipe is no gate.** In `run-tests | tail -1 && deploy` the `&&` sees the status of
+  `tail`, so the deploy runs on failing tests (zsh and bash without `pipefail`). Run the gate
+  unpiped and trim its output afterwards, or set `pipefail`.
 - **Verify the measurement too.** A timer started after the blocking call measured nothing (it
   reported zero delay); when a number contradicts the expectation, suspect the harness first.
 - **Measure defaults; do not read them from a configuration object.** A value absent from a
@@ -146,6 +161,17 @@ right but wrong together. This skill is the order of work that catches those bef
   did not know about waits too. Find the stages in the framework source (lifecycle phases, blocking
   `stop()`/`destroy()`, nested transactions), measure with every one held busy and small timeouts, and
   pin the sum in a test.
+- Agent adds a transaction guard to a repository method and re-runs the callers' mocked-manager specs -
+  they stay green while the production caller throws from inside its own `TransactionTemplate`; one
+  spec must go through the real caller with a real manager.
+
+- Agent reverts a fix in place because it works alone - a background build or test run reads the
+  reverted file and reports the revert as a failure (or builds an image from it), and a restore of
+  the same size within the same second leaves the reverted bytecode in the cache.
+- Agent pipes the test run through `tail` before `&&` - the deploy step runs although tests failed.
+- Agent follows this file but does not open the reference the table routes to - it rebuilds a
+  defect that interactions already lists (in the incident, one counter used as both ownership token
+  and give-up budget).
 
 ## Maintaining this skill
 

@@ -5,6 +5,14 @@ into a defect that no single finding described. Re-check each batch of fixes for
 patterns. Each one comes from a recorded incident, and each states the condition under which
 it applies. Outside that condition, treat it as a question to ask, not as a known defect.
 
+Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-resend-branch) ·
+[Errors now surface + deduplication that answers retries](#errors-now-surface--deduplication-that-answers-retries) ·
+[Clearing managed state + work scheduled at commit](#clearing-managed-state--work-scheduled-at-commit) ·
+[A new inner transaction per request](#a-new-inner-transaction-per-request) ·
+[Attempt counters reused as a budget](#attempt-counters-reused-as-a-budget) ·
+[Refunding attempts + a queue ordered by priority](#refunding-attempts--a-queue-ordered-by-priority) ·
+[A fix in one mode or profile only](#a-fix-in-one-mode-or-profile-only) · [Gotchas](#gotchas)
+
 ## Acknowledgement change + a resend branch
 
 - **Condition:** the consumer now commits offsets after processing (for example Spring Kafka's
@@ -62,6 +70,47 @@ it applies. Outside that condition, treat it as a question to ask, not as a know
 - **What happens:** sustained rate limiting alone (about 50 minutes of 429 responses in the
   incident) made the code give up on healthy messages.
 - **Recorded remedy:** keep the ownership token and the send budget in separate fields.
+- **Second incident (2026-10-12):** a claim token made of the attempt count alone collided after a manual
+  requeue reset the count. A late finisher from an old claim matched a newer claim, gave its attempt back,
+  and the newer claim's paid result was discarded (a review lane's probe). The token became the pair of
+  attempt count and claim timestamp, pinned by a test that fails when the timestamp comparison is removed.
+
+## Refunding attempts + a queue ordered by priority
+
+- **Condition:** jobs make calls that cost money or quota; a failed job is retried after a delay and gives
+  up after N attempts; a fix gives the attempt back and stops the run for failures that are not the item's
+  fault (bad credentials, exhausted quota, rate limits, an outage); the queue hands out the highest-priority
+  due job first.
+- **What happened, one fix after another (2026-10-12; each defect reproduced by a review lane's probe):**
+  1. No refund except for 401 and 403: an exhausted credit balance (a 400) or a mistyped model name (a 404)
+     failed every queued job for good.
+  2. Refund without a bound: an item that always produced a refundable failure (a timeout on that input)
+     was refunded forever, stayed first in line and stopped every run. Nothing behind it was processed.
+  3. Refund once, tracked by the kind of the last error stored on the job: a revoked key that lasted
+     several runs was charged from the second run on, which is defect 1 at a slower rate. A scheduled
+     requeue of failed jobs reset the counters and removed the bound again.
+  4. Confirm against a second item before blaming the provider: one rate-limit response charged a healthy
+     item because the next item succeeded; two bad items at the head confirmed each other on every run; an
+     error raised after a successful response (a code defect) was confirmed by every probe, at two paid
+     calls per run.
+  5. Probe only items without a failure history: a probe that itself hit a rate limit decided nothing, yet
+     both items kept their refunds, so the bad item was again never charged; and a rate-limit refund
+     overwrote the stored error kind that marked an item as suspect.
+- **Recorded remedy:** classify a failure by whose fault it can be.
+  - Never the item's (credentials, model name, credit, quota, and capacity signals such as 429, 503, 529):
+    always refund, never probe.
+  - Possibly the item's (timeouts, other 5xx, network errors): refund, then probe one item that has no such
+    failure in its history. Charge the first item only if the probe succeeds or fails for an item-level
+    reason; keep both refunds if the probe fails the same way; when the probe decides nothing, or there is
+    no such item, refund once and charge the next time.
+  - Code defects (an unexpected exception): refund once, never probe, because every probe is another paid
+    call that fails the same way.
+  - The incident kept the suspect marker as a prefix when an unrelated refund was stored, and counted
+    requeues in a suffix that later failures carry over. Separate fields would be cleaner and were not
+    built. Requeue became a manual step that skips jobs already requeued once.
+  - Each rule is pinned by a test that fails when the rule is removed.
+- **Check:** for each failure class, who pays an attempt when it repeats for ten runs, and what stops one
+  item from holding the head of the queue?
 
 ## A fix in one mode or profile only
 
@@ -84,4 +133,9 @@ it applies. Outside that condition, treat it as a question to ask, not as a know
   survives an outer rollback.
 - Agent counts rate-limited attempts toward a give-up limit - healthy work is abandoned during
   sustained rate limiting.
+- Agent refunds attempts for provider-wide failures without a bound - one input that always times out
+  holds the head of the queue forever.
+- Agent treats "the next item succeeded" as proof that the first item was at fault - a single 429
+  charges a healthy item.
+- Agent schedules a requeue of failed jobs - every per-job bound is reset on each run.
 - Agent adds a fix to the mode it is reading - the other mode or profile still lacks it.
