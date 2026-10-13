@@ -11,6 +11,7 @@ was verified and when.
 | Skill | Scope |
 | --- | --- |
 | [go-style](go-style/SKILL.md) | How to write Go, framework-independent: errors and nil, slices, maps, strings, JSON and time, goroutines, context and sync, tests, naming and API shape, and which of go vet, staticcheck, golangci-lint, gopls and go fix reports each pitfall. |
+| [go-service](go-service/SKILL.md) | Go services and long-running daemons on the standard library: net/http routing, handlers, server timeouts and shutdown, HTTP clients, database/sql with SQLite and pgx, auth, config, slog and telemetry, a log-following daemon, Kafka (franz-go) and Redis (go-redis), tests. |
 | [kotlin-spring-boot](kotlin-spring-boot/SKILL.md) | Kotlin + Spring Boot 4 backends: beans and configuration, JPA and Hibernate 7, transactions, web and ProblemDetail, security, HTTP clients, scheduling and executors, coroutines, Kafka and outbox, Modulith, observability, tests, Gradle. |
 | [kotlin-style](kotlin-style/SKILL.md) | How to write Kotlin on the JVM, framework-independent: null safety, idioms, classes, collections, exceptions, ktlint and detekt findings. |
 | [python-fastapi](python-fastapi/SKILL.md) | Python + FastAPI backends: dependencies and lifespan, Pydantic v2, SQLAlchemy 2 async, asyncio, errors, streaming, security, observability, Kafka and Redis, tests, packaging. |

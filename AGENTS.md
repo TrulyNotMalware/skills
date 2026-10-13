@@ -23,7 +23,7 @@ skills/
     └── reference/*.md        # 주제별 상세. SKILL.md 의 안내표로만 로드된다
 ```
 
-- 현재 스킬: `go-style` (Go 1.27 / go.mod `go` 1.26 / staticcheck 2026.2 / golangci-lint 2.14 / gopls 0.23 — 오류·nil·자료형·동시성·테스트·이름, 함정마다 잡는 도구, 프레임워크 무관), `kotlin-spring-boot` (Boot 4.1 / Kotlin 2.4 / Gradle KTS / Kotest+MockK), `kotlin-style` (Kotlin 2.4 / ktlint 1.8 / detekt 1.23·2.0 alpha — null 안전·관용구·클래스·예외, 프레임워크 무관), `python-fastapi` (Python 3.14 / FastAPI 0.142 / Pydantic 2.13 / SQLAlchemy 2.1 async / pytest-asyncio 1.4), `python-style` (Python 3.14 / ruff 0.16 / mypy 2.3 — 타입 어노테이션·관용구·컨벤션, 프레임워크 무관), `review-remediation` (스택 무관 절차 — 리뷰 지적 반영 순서·증거 규칙·병렬 워커. 버전 표 없음, 규칙마다 위키의 사건 기록이 근거).
+- 현재 스킬: `go-style` (Go 1.27 / go.mod `go` 1.26 / staticcheck 2026.2 / golangci-lint 2.14 / gopls 0.23 — 오류·nil·자료형·동시성·테스트·이름, 함정마다 잡는 도구, 프레임워크 무관), `go-service` (Go 1.27 / go.mod `go` 1.26.0 / modernc SQLite 1.60 / pgx 5.11 / golang-jwt 5.3 / franz-go 1.22 / go-redis 9.23 — net/http 서버·클라이언트·수명주기, database/sql, 인증, 설정·관측, 로그 수집 데몬, 테스트. stdlib 우선), `kotlin-spring-boot` (Boot 4.1 / Kotlin 2.4 / Gradle KTS / Kotest+MockK), `kotlin-style` (Kotlin 2.4 / ktlint 1.8 / detekt 1.23·2.0 alpha — null 안전·관용구·클래스·예외, 프레임워크 무관), `python-fastapi` (Python 3.14 / FastAPI 0.142 / Pydantic 2.13 / SQLAlchemy 2.1 async / pytest-asyncio 1.4), `python-style` (Python 3.14 / ruff 0.16 / mypy 2.3 — 타입 어노테이션·관용구·컨벤션, 프레임워크 무관), `review-remediation` (스택 무관 절차 — 리뷰 지적 반영 순서·증거 규칙·병렬 워커. 버전 표 없음, 규칙마다 위키의 사건 기록이 근거).
 - 이력 로그는 이 저장소에 두지 않는다. 위키 `~/workspace/llm_wiki/wiki/tech/skills-authoring.md` 에만 남긴다(위키 규칙은 그 저장소의 CLAUDE.md).
 
 ## 작성 규칙
@@ -72,12 +72,15 @@ skills/
 - 기본값은 설정 dict 가 아니라 **동작으로** 확인한다(멈춘 서버에 붙여 타임아웃 재기 등).
 - 끝없이 도는 제너레이터·루프를 시험할 때는 서브프로세스로 띄우고 제한 시간 뒤 `kill -9` 한다(이벤트 루프가 점유돼 서버가 멈춘 적이 있다).
 
-### Go 스킬을 검증할 때 (2026-10-08 go-style)
+### Go 스킬을 검증할 때 (2026-10-08 go-style, 2026-10-12 go-service)
 
 - **go.mod `go` 줄 변형마다 모듈을 분리**한다. 같은 툴체인이라도 `go` 줄이 루프 변수·ServeMux 패턴·`rand.Seed`·vet 검사(loopclosure, stdversion, printf)를 바꾼다. 경계 판정은 세 가지로 적는다: 그 코드가 속한 모듈의 `go` 줄 / 메인 모듈의 `go` 줄(GODEBUG) / 툴체인.
 - 옛 툴체인은 `GOTOOLCHAIN=go1.2X.Y go ...` 로 돌린다(모듈 캐시에 받아 둔다. 이때 `go` 줄은 툴체인보다 높으면 안 된다). 툴체인 경계 주장은 경계 앞뒤 툴체인을 둘 다 돌린다.
 - **golangci-lint 의 "못 잡는다"는 `--uniq-by-line=false --allow-parallel-runners` 와 `max-issues-per-linter: 0`·`max-same-issues: 0` 으로만 판정한다.** 기본 `uniq-by-line` 은 한 줄에 다른 린터가 이미 낸 이슈를 지우고, 병렬 실행은 출력 없이 실패한다 — 두 프로브 레인이 각각 이 때문에 거짓 "none" 을 얻었다. `gopls check` 는 `-severity=hint` 를 줘야 modernizer 등 힌트가 보인다.
 - `go test` 는 vet 의 일부(12개)만 돈다. "vet 이 잡는다"는 `go vet ./...` 결과로 판정한다.
+- **서비스 동작은 실제 리스너와 원시 TCP 클라이언트로 행렬을 잰다**(2026-10-12 go-service). 같은 설정이라도 다음 요청을 보내는 시점(본문 drain 의 연결 재사용), 래퍼 체인 순서(`r.Pattern`·Flusher·Hijack), 본문을 EOF 까지 읽었는지(연결 끊김 감지)에 따라 결과가 갈렸다. 경쟁이 있는 칸은 한 번 측정값이 아니라 여러 번 돌린 범위로 쓴다 — 재검증에서 "항상 새 연결" 이 실은 0–36 % 재사용이었다.
+- **문서 코드 블록은 보이는 그대로 컴파일되는지 기계적으로 훑는다**(`.omc/artifacts/go-service-2026-10-12/sweepfile.py`: 파일의 블록을 한 패키지로 묶고 goimports). `// ...` 생략이 쓰이는 정의를 가리거나 문장만 있는 조각이 Codex 두 번·재검증 한 번에 연달아 나왔다.
+- 이 맥미니에서는 cgo 링크가 깨져 있다(CommandLineTools SDK 27.0 tbd). 빌드·테스트는 `CGO_ENABLED=0`, `go test -race` 는 그대로 돈다 — 초안 에이전트 셋이 "`-race` 는 cgo 필요" 라고 잘못 적었다.
 
 ### 헤드리스 실전 검증 (트리거·라우팅)
 
