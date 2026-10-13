@@ -23,7 +23,7 @@ skills/
     └── reference/*.md        # 주제별 상세. SKILL.md 의 안내표로만 로드된다
 ```
 
-- 현재 스킬: `go-style` (Go 1.27 / go.mod `go` 1.26 / staticcheck 2026.2 / golangci-lint 2.14 / gopls 0.23 — 오류·nil·자료형·동시성·테스트·이름, 함정마다 잡는 도구, 프레임워크 무관), `go-service` (Go 1.27 / go.mod `go` 1.26.0 / modernc SQLite 1.60 / pgx 5.11 / golang-jwt 5.3 / franz-go 1.22 / go-redis 9.23 — net/http 서버·클라이언트·수명주기, database/sql, 인증, 설정·관측, 로그 수집 데몬, 테스트. stdlib 우선), `kotlin-spring-boot` (Boot 4.1 / Kotlin 2.4 / Gradle KTS / Kotest+MockK), `kotlin-style` (Kotlin 2.4 / ktlint 1.8 / detekt 1.23·2.0 alpha — null 안전·관용구·클래스·예외, 프레임워크 무관), `python-fastapi` (Python 3.14 / FastAPI 0.142 / Pydantic 2.13 / SQLAlchemy 2.1 async / pytest-asyncio 1.4), `python-style` (Python 3.14 / ruff 0.16 / mypy 2.3 — 타입 어노테이션·관용구·컨벤션, 프레임워크 무관), `review-remediation` (스택 무관 절차 — 리뷰 지적 반영 순서·증거 규칙·병렬 워커. 버전 표 없음, 규칙마다 위키의 사건 기록이 근거).
+- 현재 스킬: `go-style` (Go 1.27 / go.mod `go` 1.26 / staticcheck 2026.2 / golangci-lint 2.14 / gopls 0.23 — 오류·nil·자료형·동시성·테스트·이름, 함정마다 잡는 도구, 프레임워크 무관), `go-service` (Go 1.27 / go.mod `go` 1.26.0 / modernc SQLite 1.60 / pgx 5.11 / golang-jwt 5.3 / franz-go 1.22 / go-redis 9.23 — net/http 서버·클라이언트·수명주기, database/sql, 인증, 설정·관측, 로그 수집 데몬, 테스트. stdlib 우선), `kotlin-spring-boot` (Boot 4.1 / Kotlin 2.4 / Gradle KTS / Kotest+MockK), `kotlin-style` (Kotlin 2.4 / ktlint 1.8 / detekt 1.23·2.0 alpha — null 안전·관용구·클래스·예외, 프레임워크 무관), `python-fastapi` (Python 3.14 / FastAPI 0.142 / Pydantic 2.13 / SQLAlchemy 2.1 async / pytest-asyncio 1.4 / uv 0.13, 쓰는 프로젝트에 한해 Alembic 1.20·tenacity 9.2·SQLModel 0.0.48), `python-style` (Python 3.14 / ruff 0.16 / mypy 2.3, ty 0.0.86·pyright 1.1.414 대비 — 타입 어노테이션·관용구·컨벤션, 프레임워크 무관), `review-remediation` (스택 무관 절차 — 리뷰 지적 반영 순서·증거 규칙·병렬 워커. 버전 표 없음, 규칙마다 위키의 사건 기록이 근거).
 - 이력 로그는 이 저장소에 두지 않는다. 위키 `~/workspace/llm_wiki/wiki/tech/skills-authoring.md` 에만 남긴다(위키 규칙은 그 저장소의 CLAUDE.md).
 
 ## 작성 규칙
@@ -71,6 +71,8 @@ skills/
 - **구현이 갈리는 축은 양쪽을 돌린다**: stdlib 이벤트 루프와 uvloop, httptools 와 h11, 대상 DB 와 SQLite. 한쪽 결과를 일반화해 틀린 일이 여러 번 있었다.
 - 기본값은 설정 dict 가 아니라 **동작으로** 확인한다(멈춘 서버에 붙여 타임아웃 재기 등).
 - 끝없이 도는 제너레이터·루프를 시험할 때는 서브프로세스로 띄우고 제한 시간 뒤 `kill -9` 한다(이벤트 루프가 점유돼 서버가 멈춘 적이 있다).
+- **라이브러리가 동봉한 공식 스킬을 대조 기준으로 쓴다(2026-10-13).** FastAPI 는 0.133.1 부터 패키지 안에 `fastapi/.agents/skills/fastapi/` 를 넣는다(설치 버전과 일치). 공식 스킬이 권하는 모양(제너레이터 엔드포인트, `fastapi run`, `def` 기본)이 실행해 보면 조용히 틀리는 조건을 갖고 있었다 — 공식 권고도 실행으로 판정한다.
+- **mypy 는 번들 typeshed 로 판정한다.** typeshed main 이 `@contextmanager` 의 `Iterator` 반환을 deprecated 로 바꿨지만 mypy 2.3·2.4 는 조용했고 ty 0.0.86 만 실패했다(2026-10-13). 타입 규칙을 바꿀 근거는 최신 typeshed(`curl` 로 main 의 `.pyi`)와 ty·pyright 로도 확인한다.
 
 ### Go 스킬을 검증할 때 (2026-10-08 go-style, 2026-10-12 go-service)
 
@@ -101,7 +103,7 @@ skills/
 ## 버전 올릴 때
 
 1. `SKILL.md` 대상 버전 표 갱신(최신은 `latest-versions.sh` 로 조회).
-2. 스킬 디렉터리에서 버전 문자열을 grep 해 해당 문장만 재검증. 찾을 문자열은 각 `SKILL.md` 의 "Maintaining this skill" 절에 있다(Kotlin: `Boot 4`, `4.1`, `Framework 7`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `2.3.20`, `2.4` / Python: `FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `httpx2` / Go: `go ≥`, `main go ≥`, `toolchain ≥`, `1.27`, `GODEBUG`, `SA`, `golangci`, `gopls`, `go fix` 등).
+2. 스킬 디렉터리에서 버전 문자열을 grep 해 해당 문장만 재검증. 찾을 문자열은 각 `SKILL.md` 의 "Maintaining this skill" 절에 있다(Kotlin: `Boot 4`, `4.1`, `Framework 7`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `2.3.20`, `2.4` / Python: `FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `httpx2`, `fastapi-cli`, `uv 0.`, `ty 0.`, `pyright 1.`, `typeshed` / Go: `go ≥`, `main go ≥`, `toolchain ≥`, `1.27`, `GODEBUG`, `SA`, `golangci`, `gopls`, `go fix` 등).
 3. 위키 `skills-authoring.md` 의 "검증으로 뒤집힌 주장" 표 항목은 버전 경계에 걸린 것이 많다 — 우선 재실행.
 4. 위키 이력에 한 줄.
 

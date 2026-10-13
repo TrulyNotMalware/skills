@@ -10,12 +10,12 @@ only (SQLAlchemy 2.1). Without it, `from sqlalchemy.ext.asyncio import ...` rais
 Contents: [Engine and session](#engine-and-session) · [Transactions](#transactions) ·
 [Concurrency](#concurrency) · [Loading relationships](#loading-relationships) ·
 [Server-generated values](#server-generated-values) · [Column types](#column-types) ·
-[Identity map](#identity-map) · [Gotchas](#gotchas)
+[Identity map](#identity-map) · [Migrations (Alembic)](#migrations-alembic) · [Gotchas](#gotchas)
 
 ## Engine and session
 
 ```python
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
     engine = create_async_engine(
         "postgresql+asyncpg://app:secret@localhost:5432/app",
         pool_size=10,
@@ -193,6 +193,38 @@ other's uncommitted changes.
   Filter with `Parent.children.any(...)` (an `EXISTS`), page the parents, and load the children
   with `selectinload`. `joinedload(Parent.children)` with `.limit()` is safe too: SQLAlchemy applies
   the limit to the parents in a subquery.
+- `OFFSET` pages shift when rows change between requests. 25 rows, pages of 10, one change between
+  page 1 and page 2 (SQLite): ordered by a mutable `updated_at`, an edit skipped one row and
+  repeated another; ordered by `created_at`, an insert repeated one. Keyset pagination on an
+  immutable key plus a unique tiebreaker had neither; a keyset on `updated_at` still skipped the
+  edited row. Rows with equal sort keys have no defined order, so a non-unique `ORDER BY` with
+  `LIMIT` can return them on different pages (PostgreSQL docs, not run). Order by
+  `(created_at, id)` and page with a cursor:
+
+```python
+from datetime import datetime
+
+from sqlalchemy import DateTime, Select, select, tuple_
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Post(Base):
+    __tablename__ = "post"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+def page_after(cursor: tuple[datetime, int] | None, size: int) -> Select[Post]:
+    stmt = select(Post).order_by(Post.created_at.desc(), Post.id.desc()).limit(size)
+    if cursor is not None:
+        stmt = stmt.where(tuple_(Post.created_at, Post.id) < tuple_(*cursor))
+    return stmt
+```
+
 - Set `lazy="raise"` on relationships so a missing eager load fails in every environment, including
   sync test helpers (`InvalidRequestError: 'Author.posts' is not available due to lazy='raise'`).
 - For a single on-demand load, mix in `AsyncAttrs` and `await obj.awaitable_attrs.posts`. This
@@ -311,6 +343,51 @@ if another transaction has changed the row. Where current data matters, use
     `cascade="all, delete-orphan", passive_deletes=True`: the database deletes unloaded children
     and the ORM deletes loaded ones.
 
+## Migrations (Alembic)
+
+Applies to Alembic 1.20 with the async template (`alembic init -t async`).
+
+- Autogenerate compares the database with `target_metadata`, which holds only the models whose
+  modules were imported. An `env.py` that imports `Base` from the module defining it, with the
+  models in other modules, sees no tables: the migration it writes is `op.drop_table(...)` for
+  every table, with no error. Point `target_metadata` at your own module that imports every model
+  module (`app.models` stands for it):
+
+```python
+from app.models import Base  # your own module that imports every model module
+
+target_metadata = Base.metadata
+```
+
+- Without a naming convention, an unnamed constraint (`UniqueConstraint("email")`) autogenerates
+  `op.create_unique_constraint(None, ...)` and a downgrade `op.drop_constraint(None, ...)`. The
+  revision still exits `0`, with a comment in the file and a `UserWarning` on stderr; the
+  downgrade fails with `CompileError: Can't emit DROP CONSTRAINT
+  ... it has no name` (rendered for PostgreSQL with `--sql`, not run against a server). Set the
+  convention before the first migration; with this `ck` entry, check constraints need `name=`
+  (`InvalidRequestError` otherwise):
+
+```python
+from sqlalchemy import MetaData
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    metadata = MetaData(
+        naming_convention={
+            "ix": "ix_%(column_0_label)s",
+            "uq": "uq_%(table_name)s_%(column_0_name)s",
+            "ck": "ck_%(table_name)s_%(constraint_name)s",
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+            "pk": "pk_%(table_name)s",
+        },
+    )
+```
+
+- `alembic check` exits non-zero (255) when autogenerate would emit operations, the `drop_table`
+  of a missing import included, and `0` with "No new upgrade operations detected." Run it in CI
+  against a database migrated to head.
+
 ## Gotchas
 
 - Agent flushes and returns without `commit()` - the session closes with a rollback; the client gets `201` and nothing is stored.
@@ -323,6 +400,9 @@ if another transaction has changed the row. Where current data matters, use
 - Agent awaits an outbound HTTP call while the session's transaction is open - the connection stays checked out and the pool runs out; commit first.
 - Agent leaves an invalid object pending - the next unrelated query fails through autoflush.
 - Agent paginates a query that joins a collection - `LIMIT` cuts child rows, fewer parents than requested.
+- Agent paginates with `LIMIT`/`OFFSET` over a mutable or non-unique sort key - rows repeat or vanish between pages without an error.
+- Agent points Alembic's `target_metadata` at `Base.metadata` without importing the model modules - autogenerate writes a migration that drops every table.
+- Agent declares constraints without a `MetaData` naming convention - the autogenerated downgrade has `drop_constraint(None, ...)` and fails.
 - Agent uses `on_conflict_do_update` and expects `onupdate` columns to change - they do not.
 - Agent reads objects after `rollback()` - they are expired even with `expire_on_commit=False`.
 - Agent calls `refresh()` on an object with unflushed changes - the changes are discarded.

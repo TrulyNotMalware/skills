@@ -1,16 +1,17 @@
 ---
 name: python-style
 description: >
-  How to write Python: complete type annotations, Pythonic idioms, naming and code conventions,
-  and the pitfalls that run without error. Use when writing, reviewing, refactoring, or debugging
-  any Python code (scripts, CLIs, libraries, services, tests): function signatures and type hints
+  How to write Python: complete type annotations, Pythonic idioms, naming and code conventions, and
+  the pitfalls that run without error. Use when writing, reviewing, refactoring, or debugging any
+  Python code (scripts, CLIs, libraries, services, tests): function signatures and type hints
   (parameters, return types, generics, Protocol, TypedDict, dataclasses, Enum), mypy or ruff
   findings, default arguments, comprehensions and iteration, truthiness and None handling, string,
-  number and datetime handling, exceptions, logging, imports and module layout, naming, and
-  pyproject lint/type-check configuration. Also use when Python code "works but returns the wrong
-  thing" (a default that is shared between calls, a zero treated as missing, a comparison that is
-  always False, a check that never runs). Framework specifics live elsewhere: use python-fastapi
-  together with this skill for FastAPI, Pydantic, SQLAlchemy and asyncio service code.
+  number and datetime handling, exceptions and cleanup, context managers, thread and process pools,
+  logging, imports, naming, lint and type-check configuration, and ty or pyright instead of mypy.
+  Also use when Python code "works but returns the wrong thing" (a default that is shared between
+  calls, a zero treated as missing, a comparison that is always False, a check that never runs).
+  Framework specifics live elsewhere: use python-fastapi together with this skill for FastAPI,
+  Pydantic, SQLAlchemy and asyncio service code.
 ---
 
 # Python style
@@ -23,14 +24,16 @@ the matching reference before writing or reviewing code in that area.
 
 ## Target versions
 
-Verified 2026-10-01 by running code on these versions. Version-bound statements are tagged
-`(Python 3.14)`, `(ruff 0.16)` or `(mypy 2.3)`.
+Verified 2026-10-01 by running code on these versions, extended 2026-10-13. Version-bound
+statements are tagged `(Python 3.14)`, `(ruff 0.16)`, `(mypy 2.3)`, `(ty 0.0.86)` or
+`(pyright 1.1.414)`.
 
 | Component | Baseline | Notes |
 |---|---|---|
 | Python | 3.14 | Lazy annotations (PEP 649); inline type parameters (PEP 695); `except A, B:` without parentheses |
 | ruff | 0.16 | Linter and formatter; `B909` and `PLW1514` are still preview rules |
 | mypy | 2.3 | `strict = true`; no implicit `Optional` |
+| ty, pyright | 0.0.86, 1.1.414 | Only where a project uses them instead of mypy; they report less by default |
 
 The project's own configuration wins. Read `pyproject.toml` (or `ruff.toml`, `mypy.ini`,
 `setup.cfg`) and the root `AGENTS.md`/`CLAUDE.md` first, and check `python --version` of the
@@ -62,8 +65,10 @@ interpreter that actually runs the code.
 - No mutable or computed default arguments; use `None` and create the value inside.
 - A fixed set of values is an `Enum`/`Literal`; a record is a `@dataclass`/`TypedDict`; neither
   is a bare `str` or `dict[str, Any]`.
-- Catch specific exceptions, keep the cause (`raise ... from exc`), never `except Exception:
-  pass`.
+- Catch specific exceptions and keep the cause (`raise ... from exc`). Catch `Exception` only at an
+  isolation boundary (a batch item, a worker loop, a thread's top) and log it with its traceback
+  (`logger.exception` or `exc_info=True`); never `except Exception: pass`. Cleanup goes in
+  `finally`, not in `except`.
 - Timezone-aware datetimes, `Decimal` or integer minor units for money, `encoding="utf-8"` on
   every text file.
 - `logging` with lazy arguments, not `print` or f-strings in log calls. No work at import time.
@@ -73,9 +78,9 @@ interpreter that actually runs the code.
 
 | Task touches... | Read |
 |---|---|
-| Function signatures, return types, generics, `Any` vs `object`, `X \| None`, `TYPE_CHECKING` imports, `Protocol`, `TypedDict`, `NewType`, `Enum` exhaustiveness, `@override`, what mypy does and does not check | [reference/typing.md](reference/typing.md) |
-| Loops and comprehensions, default arguments, shared mutable state, closures, `zip`, generators, truthiness and `None`, `match`, strings, floats and money, datetimes, encodings, exceptions, `subprocess`, caching | [reference/idioms.md](reference/idioms.md) |
-| Naming, shadowed builtins and module names, keyword-only parameters, dataclass options, imports and import-time work, `__main__` guard, exception hierarchy, logging, comments and docstrings, ruff and mypy configuration | [reference/structure.md](reference/structure.md) |
+| Function signatures, return types, generics, `Any` vs `object`, `X \| None`, `TYPE_CHECKING` imports, `Protocol` and `runtime_checkable`, `TypedDict`, `NewType`, `Enum` exhaustiveness, `@override`, context manager return types, what mypy does and does not check, ty or pyright instead of mypy | [reference/typing.md](reference/typing.md) |
+| Loops and comprehensions, default arguments, shared mutable state, closures, `zip`, generators, truthiness and `None`, `match`, strings, floats, NaN and money, datetimes, encodings, exceptions and cleanup, `@contextmanager`, `subprocess`, thread and process pool futures, caching | [reference/idioms.md](reference/idioms.md) |
+| Naming, shadowed builtins and module names, keyword-only parameters, dataclass options, imports and import-time work, `from` imports of mutable settings, `__main__` guard, exception hierarchy and constructors, where to catch `Exception`, logging and `extra`, comments and docstrings, ruff and mypy configuration, lint and format order, version floor per tool | [reference/structure.md](reference/structure.md) |
 
 ## Gotchas
 
@@ -97,7 +102,24 @@ says which tool, if any, reports the problem.
 - Agent reads a flag with `bool(os.environ.get("DEBUG"))` - `"false"` is `True`.
 - Agent stores timestamps with `datetime.now()` and money in `float` - naive local time, binary
   rounding.
-- Agent catches `Exception` and carries on - the bug is hidden and the traceback lost.
+- Agent catches `Exception` away from an isolation boundary, or logs it without the traceback -
+  the bug is hidden and the traceback lost.
+- Agent puts cleanup after a `yield` outside `try`/`finally` in a `@contextmanager`, or rolls back
+  in `except Exception:` - an error, Ctrl+C or a cancelled task skips it.
+  See [idioms](reference/idioms.md#resources-and-processes).
+- Agent submits work to a thread or process pool and never reads the futures - every exception
+  raised in the workers is lost.
+- Agent gives a custom exception a constructor that `type(exc)(*exc.args)` cannot call - it cannot
+  be copied or unpickled; in a `ProcessPoolExecutor` the caller gets `BrokenProcessPool` instead of
+  the error. See [structure](reference/structure.md#errors).
+- Agent runs `ruff format` or `ruff check --fix` before reading the lint output - a missing comma
+  between two strings is merged into one literal and nothing reports it afterwards.
+  See [structure](reference/structure.md#tooling).
+- Agent annotates a `@contextmanager` function `-> Iterator[T]` - current typeshed deprecates that
+  overload and ty fails on it; write `Generator[T]`.
+- Agent swaps mypy `strict` for ty or pyright's default mode - unannotated parameters, bare `list`
+  and returned `Any` stop being reported.
+  See [typing](reference/typing.md#when-the-project-uses-ty-or-pyright).
 - Agent validates input with `assert` - removed under `python -O`.
 - Agent lets a linter move a Pydantic field's import under `TYPE_CHECKING` - imports fine, fails
   on first use. See [typing](reference/typing.md#imports-used-only-in-annotations).
@@ -106,8 +128,8 @@ says which tool, if any, reports the problem.
 
 ## Maintaining this skill
 
-When bumping the target versions: update the table above, then grep this directory for
-`Python 3.`, `3.14`, `ruff 0.`, `mypy 2.`, `preview`, `PEP 6` and `PEP 7`, and re-run each tagged
-statement. Rule codes change status between ruff releases (preview to stable, renames); re-run
-the pitfall-to-rule mapping in `reference/idioms.md`. The change history is kept outside this
-directory, in the author's wiki.
+When bumping the target versions: update the table above, then grep this directory for `Python 3.`,
+`3.14`, `ruff 0.`, `mypy 2.`, `ty 0.`, `pyright 1.`, `typeshed`, `preview`, `PEP 6` and `PEP 7`, and
+re-run each tagged statement. Rule codes change status between ruff releases (preview to stable,
+renames); re-run the pitfall-to-rule mapping in `reference/idioms.md`. The change history is kept
+outside this directory, in the author's wiki.

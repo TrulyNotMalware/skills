@@ -8,12 +8,12 @@ Contents: [Annotate everything](#annotate-everything) · [Modern spelling](#mode
 [Imports used only in annotations](#imports-used-only-in-annotations) ·
 [What a fully annotated program still gets wrong](#what-a-fully-annotated-program-still-gets-wrong) ·
 [Precise types instead of `str` and `dict`](#precise-types-instead-of-str-and-dict) ·
-[Gotchas](#gotchas)
+[When the project uses ty or pyright](#when-the-project-uses-ty-or-pyright) · [Gotchas](#gotchas)
 
 ## Annotate everything
 
 ```python
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Generator, Iterator
 from contextlib import contextmanager
 
 
@@ -36,7 +36,7 @@ async def ticks(limit: int) -> AsyncIterator[int]:
 
 
 @contextmanager
-def counting(start: int) -> Iterator[Counter]:
+def counting(start: int) -> Generator[Counter]:
     yield Counter(start)
 
 
@@ -52,12 +52,18 @@ def test_bump() -> None:
   helpers, nested functions, tests, fixtures, scripts' `main()`. `*args: int` and
   `**kwargs: str` are annotated with the type of one element.
 - Generators return `Iterator[T]`, async generators `AsyncIterator[T]`. A function decorated with
-  `@contextmanager` is annotated as the generator it is (`Iterator[T]`), not as a context manager.
+  `@contextmanager`/`@asynccontextmanager` is annotated as the generator it is,
+  `Generator[T]`/`AsyncGenerator[T]`, not as a context manager. Current typeshed deprecates the
+  `Iterator`/`AsyncIterator` overloads of both decorators: ty reports `deprecated` by default and
+  exits 1 (ty 0.0.86), pyright does in strict mode or with `reportDeprecated` on (pyright
+  1.1.414), ruff `UP052` flags it (preview). mypy 2.3 and 2.4 bundle older stubs and accept both
+  spellings.
 - When a caller needs `close()`/`aclose()`, say so: a generator the caller wraps in
   `contextlib.closing`/`aclosing`, or returns where a `Protocol` or `Callable` promises a
-  `Generator`/`AsyncGenerator`, is annotated `Generator[T, None, None]`/`AsyncGenerator[T, None]`.
-  `Iterator`/`AsyncIterator` declare no `close`, so `aclosing(fn())` is a mypy `type-var` error and
-  `functools.partial(fn)` does not satisfy such a protocol, although the code runs (mypy 2.4).
+  `Generator`/`AsyncGenerator`, is annotated `Generator[T]`/`AsyncGenerator[T]`.
+  `Iterator`/`AsyncIterator` declare no `close`, so `closing(fn())` and `aclosing(fn())` are mypy
+  `type-var` errors and `functools.partial(fn)` does not satisfy such a protocol, although the
+  code runs (mypy 2.3).
 - Containers carry their type arguments: `list[str]`, `dict[str, int]`, `tuple[int, ...]`. A bare
   `list` is `list[Any]`.
 - Annotate a variable only where inference has nothing to go on: an empty container
@@ -262,15 +268,58 @@ def open_mode(mode: Literal["r", "w"]) -> str:
   expected is an error, at no runtime cost.
 - `Protocol` describes what a collaborator must be able to do without a base class. Classes
   match by shape; `EmailNotifier` above never mentions `Notifier`.
+- `@runtime_checkable` lets `isinstance(obj, SomeProtocol)` run, but it checks only that the
+  member names exist (Python 3.14). A method with another signature, an attribute that is not
+  callable and a data member of the wrong type all pass, and the mismatch fails at the call. When
+  the object is typed `object` or `Any`, mypy then treats it as the protocol, and neither
+  `mypy --strict`, pyright nor ruff reports it. With a concrete static type, mypy
+  (`warn_unreachable`) and pyright report the branch; with a union, only pyright does.
 - `@override` makes a renamed base method an error (`no base method was found`) instead of a
   subclass method that is never called.
 - `Final` forbids reassignment of a constant. `Self` is the return type of methods that return
   their own instance.
 
+## When the project uses ty or pyright
+
+Measured with ty 0.0.86 and pyright 1.1.414 against `mypy --strict` (mypy 2.3). All three report
+a missing return, `int = None`, a misspelled `TypedDict` key, `@override` without a base method,
+a member missed before `assert_never`, `aclosing()` of an `AsyncIterator`, `Final` reassignment,
+a `NewType` mix-up, an unresolved import inside a function and an unawaited coroutine (a warning
+in ty). These differ:
+
+- **Missing annotations.** ty has no rule for an unannotated parameter, and pyright reports one
+  only in strict mode (`reportMissingParameterType`). ruff `ANN` is then the only check of this
+  skill's annotation rule; keep it on.
+- **Bare generics and `Any` returns pass by default.** A bare `list` or `dict` is reported by ty
+  only with `missing-type-argument` enabled, by pyright only in strict mode. Returning `Any` from
+  `-> int` (mypy `no-any-return`) is reported by ty only with `unsound-return-statement`, by
+  pyright in neither mode.
+- **Unreachable code is not reported by default.** Neither ty nor pyright, standard or strict,
+  reports a statement after an `isinstance` branch that always returns, after `return`, `raise`
+  or `sys.exit()`, or under `x is None` on an `int`; pyright strict reports only the unnecessary
+  check. pyright reports all of them with `reportUnreachable` on. ty's `redundant-condition-strict`
+  (off by default) reports some always-true or always-false conditions, depending on the shape.
+- **Pydantic constructors.** mypy without the pydantic plugin checks every argument. The
+  plugin's defaults accept any type for a lax field and any extra keyword, and still report a
+  missing field and a wrong type for a `ConfigDict(strict=True)` model or `Field(strict=True)`;
+  `init_typed` and `init_forbid_extra` restore the rest. ty models Pydantic's lax mode: an `int`
+  field accepts any `str` or `float` (`"bad"` and `1.5` pass, then fail validation at runtime),
+  while a type lax mode never coerces (a `list` for an `int`, an `int` for a `str`), a missing
+  field and the strict shapes are reported. pyright reports all of them.
+- **Ignore comments mean different things.** ty honours `# type: ignore` only without a code: any
+  bracketed code, its own rule names included, leaves the error reported. pyright treats every
+  `# type: ignore[...]` as bare, whatever the code. Write `# ty: ignore[rule]` or
+  `# pyright: ignore[rule]`. ruff `PGH003` flags a bare `type: ignore` and a bare
+  `pyright: ignore`, not a bare `ty: ignore`; ty's `blanket-ignore-comment` is off by default.
+- **ty is 0.0.x.** Rule names and default levels change between releases; `ty explain rule` lists
+  the current ones. In 0.0.86 a warning already makes `ty check` exit 1, so `--error-on-warning`,
+  offered as the counterpart of `mypy --strict` (as popular guides suggest), adds no check.
+
 ## Gotchas
 
 - Agent leaves a helper or a test completely unannotated because the types are "obvious" - mypy skips its body unless `check_untyped_defs` is enabled directly or through `strict`.
-- Agent annotates an async generator as `AsyncIterator[T]` and a caller wraps it in `contextlib.aclosing` or binds it to an `AsyncGenerator` protocol - mypy `type-var`/protocol mismatch; write `AsyncGenerator[T, None]` when `aclose()` is part of the contract.
+- Agent annotates an async generator as `AsyncIterator[T]` and a caller wraps it in `contextlib.aclosing` or binds it to an `AsyncGenerator` protocol - mypy `type-var`/protocol mismatch; write `AsyncGenerator[T]` when `aclose()` is part of the contract.
+- Agent annotates a `@contextmanager` function `-> Iterator[T]` - current typeshed deprecates that overload; ty fails the run (`deprecated`, ty 0.0.86) and ruff `UP052` flags it (preview); write `Generator[T]`.
 - Agent omits `-> None` on an `__init__` that has annotated parameters - mypy `strict` accepts it, the rule of this skill does not; ruff `ANN204` reports it.
 - Agent types a decorator as `Callable[..., R]` - calls of every decorated function lose their argument checks; use `Callable[P, R]`.
 - Agent imports `ClassVar` only under `TYPE_CHECKING` - the dataclass turns the class variable into a field.
@@ -285,6 +334,8 @@ def open_mode(mode: Literal["r", "w"]) -> str:
 - Agent returns `dict[str, Any]` from a function - every caller is unchecked; return a dataclass or `TypedDict`.
 - Agent trusts annotations to validate input - `P("a")` runs for `x: int`.
 - Agent overrides a method without `@override` and later renames the base method - the subclass method silently stops being called.
+- Agent validates an object with `isinstance(obj, SomeProtocol)` - `@runtime_checkable` checks member names only; a wrong signature or a non-callable attribute passes and fails at the call.
+- Agent replaces mypy `strict` with `ty check` or pyright's default mode - unannotated parameters, bare `list`, returned `Any` and unreachable code stop being reported; keep ruff `ANN` on.
 
 ## Official sources
 

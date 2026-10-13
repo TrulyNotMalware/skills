@@ -1,8 +1,8 @@
 # Project layout, dependencies, linting, type checking, serving
 
-Applies to Python 3.14, ruff 0.16, mypy 2.3, uvicorn 0.54. Follow the project's existing tooling
-(`pip` + `requirements.txt`, `uv`, hatch, ...) rather than introducing another; this file lists
-what each tool silently does or does not check.
+Applies to Python 3.14, ruff 0.16, mypy 2.3, uvicorn 0.54, uv 0.13, fastapi-cli 0.0.32. Follow
+the project's existing tooling (`pip` + `requirements.txt`, `uv`, hatch, ...) rather than
+introducing another; this file lists what each tool silently does or does not check.
 
 Contents: [Dependencies](#dependencies) · [Linting with ruff](#linting-with-ruff) ·
 [Type checking with mypy](#type-checking-with-mypy) · [Serving](#serving) · [Gotchas](#gotchas)
@@ -18,12 +18,26 @@ Contents: [Dependencies](#dependencies) · [Linting with ruff](#linting-with-ruf
   missing package into "every token is invalid".
 - Pin what you deploy. Ranges in `pyproject.toml` describe compatibility; the deployed set comes
   from a lock file (`uv.lock`, `requirements.txt` from `pip-compile`/`pip freeze`) and is installed
-  with `--require-hashes` or `--frozen`/`--locked` where the tool supports it. A `Dockerfile` that
-  runs `pip install fastapi` builds a different application every week.
+  with `pip install --require-hashes` or `uv sync --locked`. A `Dockerfile` that runs
+  `pip install fastapi` builds a different application every week.
+- In a uv project (uv 0.13), `uv sync --locked` fails when `uv.lock` no longer matches
+  `pyproject.toml`. `uv sync --frozen` skips that check and installs the stale lock with exit 0,
+  without a dependency added to `pyproject.toml` since. Use `--locked` in CI and image builds. A
+  plain `uv run` re-locks after a `pyproject.toml` edit and rewrites `uv.lock`; in CI run
+  `uv run --locked` or set `UV_LOCKED=1`.
+- `uv sync` is exact: it uninstalls a package added with `uv pip install` (a plain `uv run` keeps
+  it), and `--no-dev` uninstalls the `dev` group, which `uv sync` otherwise installs. `uv export`
+  includes the `dev` group unless given `--no-dev`, so a `requirements.txt` exported for
+  production carries the test tools (uv 0.13).
+- Development tools in `[dependency-groups]` (PEP 735) are not extras. When `dev` is a group,
+  `pip install -e ".[dev]"` prints `WARNING: ... does not provide the extra 'dev'`, exits 0 and
+  installs the project and its runtime dependencies but none of the group (pip 25.0.1, 25.2,
+  26.2). Install a group with `pip install --group dev` (pip 25.1 or
+  later; pip 25.0 rejects the option) or with `uv sync`.
 - `requires-python = ">=3.14"` in `pyproject.toml` is enforced only when the project itself is
   installed (`pip install .`); `pip install -r requirements.txt` never reads it, and pip ignores
-  `.python-version` (uv uses it to pick the interpreter). Set both, and pin the interpreter in
-  the image.
+  `.python-version`. uv uses `.python-version` to pick the interpreter, and a pin outside
+  `requires-python` is an error (uv 0.13). Set both, and pin the interpreter in the image.
 - FastAPI's `standard` extra installs `httpx` (`<1.0`, not `httpx2`), `python-multipart`,
   `email-validator`, `uvicorn[standard]`, `pydantic-settings`, `pydantic-extra-types`, the OpenTelemetry SDK and OTLP
   exporter, `jinja2`, and the `fastapi` CLI (`standard-no-fastapi-cloud-cli` leaves the cloud
@@ -124,6 +138,16 @@ warn_required_dynamic_aliases = true
   first on shells that do not exec the last command (bash 3.2 does not; dash and bash 5.3 do).
   The shell does not forward SIGTERM, so uvicorn never sees it and is killed when the grace
   period ends. Use the `exec` form, or `exec uvicorn ...` as the last command.
+- When the image is built with `uv sync --no-dev` and started with `uv run ...`, uv syncs again
+  before running and installs the `dev` group (uv 0.13, measured outside a container). That needs
+  the network at startup and changes the environment that was built. Start with
+  `uv run --no-sync`, set `UV_NO_SYNC=1`, or exec the program from `.venv/bin`.
+- `fastapi run` (fastapi-cli 0.0.32) has no `--timeout-graceful-shutdown`, `--limit-concurrency`
+  or `--log-config` option and passes none of them to uvicorn; when stdout is a TTY it installs
+  its own log config (from source, not run). `UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=1` does not help:
+  only uvicorn's own CLI reads `UVICORN_*` variables. With one open stream, `fastapi run` was
+  still running 8 s after SIGTERM in 3 of 3 runs, while the uvicorn CLI exited after 1.2 s. When
+  the app streams, runs background tasks or needs a log config, start `uvicorn` directly.
 
 ## Gotchas
 
@@ -143,6 +167,12 @@ warn_required_dynamic_aliases = true
 - Agent runs uvicorn without `[standard]` and adds WebSocket routes - upgrades are answered as plain HTTP with a warning.
 - Agent puts `select` at both levels of the ruff config - `lint.select` wins and the top-level entries are dropped.
 - Agent installs from ranges in the image build - a different dependency set per build.
+- Agent installs with `uv sync --frozen` in CI or the image build - a dependency added to `pyproject.toml` but not locked is silently missing; use `--locked`.
+- Agent starts the container with `uv run` after `uv sync --no-dev` - uv installs the dev group at startup; use `uv run --no-sync` or `.venv/bin`.
+- Agent exports production requirements with a plain `uv export` - the dev group is included; add `--no-dev`.
+- Agent adds a package with `uv pip install` in a uv project - the next `uv sync` uninstalls it; use `uv add`.
+- Agent installs dev tools with `pip install -e ".[dev]"` when `dev` is a dependency group - a warning, exit 0, the dev tools are not installed; use `--group dev`.
+- Agent serves with `fastapi run` when the app streams or runs background tasks - there is no way to pass `--timeout-graceful-shutdown`, `--limit-concurrency` or a log config, and `UVICORN_*` variables are ignored.
 
 ## Official sources
 

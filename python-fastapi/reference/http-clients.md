@@ -11,7 +11,7 @@ Contents: [One client per process, created in lifespan](#one-client-per-process-
 ## One client per process, created in lifespan
 
 ```python
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, Request
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
     async with httpx.AsyncClient(
         base_url="https://api.example.com",
         timeout=httpx.Timeout(5.0, connect=2.0),
@@ -29,8 +29,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
         yield {"http": client}
 
 
-def get_http(request: Request) -> httpx.AsyncClient:
-    return request.state.http
+async def get_http(request: Request) -> httpx.AsyncClient:
+    client: httpx.AsyncClient = request.state.http
+    return client
 
 
 HttpClient = Annotated[httpx.AsyncClient, Depends(get_http)]
@@ -153,6 +154,47 @@ async def fetch(client: httpx.AsyncClient, slots: asyncio.Semaphore, url: str) -
 - A hand-written retry loop must decide by method and status: retry idempotent requests
   (`GET`, `PUT`, `DELETE`) on transport errors and on `502`/`503`/`504`; do not retry `POST`
   without an idempotency key, and honor `Retry-After` on `429`/`503`. Add jitter.
+- With tenacity (9.2): `retry_if_exception_type((ConnectionError, TimeoutError, OSError))` (as
+  popular guides suggest) never retries, because no httpx exception derives from those builtins
+  (one attempt against a closed port). Without `reraise=True` the last failure arrives as
+  `tenacity.RetryError`, which `except httpx.HTTPError` and handlers keyed on httpx classes miss.
+  `retry_if_result(...)` raises `RetryError` when attempts run out, even with `reraise=True`; for
+  status codes, raise with `raise_for_status()` and test the exception. Observed with the shape
+  below: `503` three attempts then `HTTPStatusError`, `404` one attempt, a closed port three
+  attempts then `ConnectError`. The shape covers transport errors and `502`/`503`/`504` only: it
+  does not retry `429` and ignores `Retry-After` (a `503` with `Retry-After: 5` ran its three
+  attempts in 0.9-2.3 s over 20 runs, never waiting the 5 s), so the rule above still applies. `wait_exponential_jitter(initial=...)`
+  is deprecated (`DeprecationWarning`, an error under `filterwarnings = error`); use `multiplier=`.
+
+```python
+import httpx
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
+
+RETRY_STATUSES = frozenset({502, 503, 504})
+
+
+def is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in RETRY_STATUSES
+    return isinstance(exc, httpx.TransportError)
+
+
+@retry(
+    retry=retry_if_exception(is_retryable),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential_jitter(multiplier=0.2, max=2.0),
+    reraise=True,
+)
+async def get_item(client: httpx.AsyncClient, item_id: int) -> httpx.Response:
+    response = await client.get(f"/items/{item_id}")  # GET: idempotent
+    response.raise_for_status()
+    return response
+```
 
 ## Requests and responses
 
@@ -226,6 +268,8 @@ def proxy_download(http: httpx.AsyncClient) -> StreamingResponse:
 - Agent sets `http2=True` against an `http://` upstream - still HTTP/1.1; without `h2` installed the client cannot even be built.
 - Agent relies on `AsyncHTTPTransport(retries=...)` for flaky upstreams - only connection failures are retried.
 - Agent retries a `POST` on timeout - a duplicate write when the first request went through.
+- Agent retries httpx calls on `ConnectionError`/`TimeoutError`/`OSError` (as popular guides suggest) - httpx exceptions derive from none of them; nothing is retried.
+- Agent uses tenacity without `reraise=True`, or retries on `retry_if_result` - the caller receives `RetryError`, which `except httpx.HTTPError` and httpx exception handlers miss.
 - Agent expects a `302` to be followed - it is returned as the response; with `follow_redirects=True` a `POST` through `302` arrives as a `GET` without body.
 - Agent sets `NO_PROXY=localhost` and calls `127.0.0.1` - proxied anyway.
 - Agent uses the bare `@respx.mock` decorator and registers a route the code never calls - the test passes; an unregistered request still fails.

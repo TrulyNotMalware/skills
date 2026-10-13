@@ -15,7 +15,7 @@ Contents: [Client](#client) · [Keys and expiry](#keys-and-expiry) · [Locks](#l
 ## Client
 
 ```python
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, Request
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
     client = redis.from_url(
         "redis://localhost:6379/0",
         decode_responses=True,
@@ -38,8 +38,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[dict[str, object]]:
         await client.aclose()
 
 
-def get_redis(request: Request) -> redis.Redis:
-    return request.state.redis
+async def get_redis(request: Request) -> redis.Redis:
+    client: redis.Redis = request.state.redis
+    return client
 
 
 Redis = Annotated[redis.Redis, Depends(get_redis)]
