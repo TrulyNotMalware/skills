@@ -45,6 +45,12 @@ right but wrong together. This skill is the order of work that catches those bef
      the response body.)
    - Does it change delivery, retry or transaction semantics? Read
      [interactions](reference/interactions.md).
+   - Does it bind the right parties? For an identity or account-linking flaw, list who controls each
+     party (the requester, the browser that completes the flow, the account that consents) before
+     accepting any binding, the reviewer's or your own. A binding between two parties the attacker
+     controls closes nothing: against a forwarded OAuth consent link, a browser cookie/PKCE binding
+     and a "confirm in chat" step for the requester both failed, because the attacker was the
+     requester and could forward the start link as easily as the consent link.
 4. **Treat your own replacement code as a hypothesis too.** Every snippet you write while
    remediating (a different fix, an alternative suggested in passing, an example in a document)
    is compiled or run once before it is committed, even a one-liner.
@@ -52,6 +58,10 @@ right but wrong together. This skill is the order of work that catches those bef
    on memory ("the SDK already retries 429"), read the library source or run it; a reviewer's
    self-reported confidence is not evidence. A reviewer that could not reach the real database or
    broker (and fell back to SQLite or to reading code) needs its finding re-run on the real one.
+   The same goes for a vendor API behind an existing client call: before a fix reuses that call for
+   a security decision, read the vendor's documentation for the method *and the token type* in use
+   (a profile endpoint that returns an e-mail for user tokens promised nothing for bot tokens, and
+   the scope it needed had to be requested together with another one).
 6. **Apply in small batches and re-check each batch.** Run an independent review lane and the
    execution checks on each batch's diff. Fixes interact with each other and with existing code,
    and a defect created by the remediation cannot be in the original review.
@@ -168,6 +178,13 @@ right but wrong together. This skill is the order of work that catches those bef
 - Agent reverts a fix in place because it works alone - a background build or test run reads the
   reverted file and reports the revert as a failure (or builds an image from it), and a restore of
   the same size within the same second leaves the reverted bytecode in the cache.
+- Agent rejects the reviewer's fix and proposes its own in the same breath - the alternative shares
+  the blind spot (both bind parties the attacker controls). Enumerate the parties first.
+- Agent reuses an existing client call for a new security check - the vendor documents the field
+  only for another method or token type, and the check fails closed for every user.
+- Agent's test fixture for a secret (a 32-character minimum, a key) trips the repository's secret
+  scanner on the pull request - its entropy rule reads the fixture as a credential. Use a
+  repetitive, obviously fake value and run the scanner on the diff before pushing.
 - Agent pipes the test run through `tail` before `&&` - the deploy step runs although tests failed.
 - Agent follows this file but does not open the reference the table routes to - it rebuilds a
   defect that interactions already lists (in the incident, one counter used as both ownership token
