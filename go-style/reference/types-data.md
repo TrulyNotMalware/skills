@@ -189,6 +189,29 @@ Contents: [Interfaces and embedding](#interfaces-and-embedding) · [Slices](#sli
   ```
 
   Reported by: none — test or review; run the test under two `TZ` values.
+- **`time.Parse(time.RFC3339, s)` and `json.Unmarshal` into a `time.Time` accept the offsets
+  `+24:00` and `+23:60`; `Time.MarshalJSON` and `MarshalText` then fail with `timezone hour outside
+  of range [0,23]`** (go1.26.1, 1.26.8 and 1.27.1; strict RFC 3339 parsing is disabled in
+  `time/format_rfc3339.go`, go.dev/issue/54580). A program that re-encodes what it parsed fails at
+  output, with no line number, and only when such a value is encoded (the minimum or maximum of a
+  range, say); `2026-01-01T1:00:00Z` (one-digit hour) and `00:00:00,5Z` (comma fraction) pass all
+  three. Validate at the input:
+
+  ```go
+  // parseStrictRFC3339 rejects offsets such as +24:00 that time.Parse accepts and MarshalText does not.
+  func parseStrictRFC3339(s string) (time.Time, error) {
+  	t, err := time.Parse(time.RFC3339, s)
+  	if err != nil {
+  		return time.Time{}, err
+  	}
+  	if _, err := t.MarshalText(); err != nil {
+  		return time.Time{}, err
+  	}
+  	return t, nil
+  }
+  ```
+
+  Reported by: none — test or review.
 
 ## encoding/json
 
@@ -201,6 +224,10 @@ names case-sensitively. None of these is reported by any tool unless noted.
 - Keys match case-insensitively (`"NAME"` fills `Name`) and unknown fields are ignored
   (`Decoder.DisallowUnknownFields` rejects them). A duplicate key keeps the last value in a map or
   `any`; a struct field is decoded twice, so `{"o":{"a":1},"o":{"b":2}}` sets both `o.A` and `o.B`.
+  With input you do not control the case-insensitive match is an overwrite:
+  `{"level":"info","Level":"debug"}` leaves `debug` in `Level`, and `"Level":5` fails the whole
+  decode with a type error. Decode such input into `map[string]json.RawMessage` and pick the exact
+  keys.
 - Numbers decoded into `any` become `float64`: `12345678901234567890` turns into
   `1.2345678901234567e+19`. Decode into typed fields, or call `Decoder.UseNumber`.
 - **`omitempty` never omits a struct or a `time.Time`**; `omitzero` `(toolchain ≥1.24)` does
@@ -284,8 +311,10 @@ the same) and not for a scanner stored in a struct field; `go vet` 1.27 has no s
 - Agent calls `time.Sleep(5)` - five nanoseconds.
 - Agent compares times with `==` - can be false for the same instant.
 - Agent parses a timestamp without a zone - UTC, hours off; a zone abbreviation depends on the host.
+- Agent re-encodes a parsed RFC 3339 time - a `+24:00` offset passes `Parse` and fails `MarshalJSON` at output, with no line number.
 - Agent tags a `time.Time` field `omitempty` - the zero time is still written.
 - Agent decodes JSON numbers into `any` - large integers lose precision.
+- Agent decodes uncontrolled JSON into a struct - a differently-cased duplicate key overwrites the field, or a type clash fails the whole document.
 - Agent reads with `json.Decoder` and assumes one value - trailing data is accepted.
 - Agent scans lines without checking `sc.Err()` - input after a 64 KiB line is silently dropped.
 

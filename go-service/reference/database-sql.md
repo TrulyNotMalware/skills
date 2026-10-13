@@ -284,6 +284,7 @@ machine zone Asia/Seoul:
 | DSN keys | stored text | `Scan` into `time.Time` (DATETIME column) |
 |---|---|---|
 | none | `2026-10-12 09:30:15.123456789 +0900 KST` | same instant, zone KST |
+| `_timezone=UTC` alone | `2026-10-12 00:30:15.123456789 +0000 UTC` | same instant, zone UTC |
 | `_time_format=sqlite` | `2026-10-12 09:30:15.123456789+09:00` | same instant, zone KST |
 | `_time_format=sqlite&_timezone=UTC` | `2026-10-12 00:30:15.123456789+00:00` | same instant, zone UTC |
 | `_time_format=datetime` | `2026-10-12 09:30:15` | **`09:30:15 UTC`: 9 h off, no error** |
@@ -297,6 +298,7 @@ ascending → [A C B]:
 | DSN keys | `> ?` UTC arg | `> ?` KST arg | `>= ?` 01:00Z | `ORDER BY` | `julianday(col) > julianday(?)`, KST arg |
 |---|---|---|---|---|---|
 | none | [A B] | [] | [A B] | [C B A] | [] (`datetime(col)` NULL) |
+| `_timezone=UTC` alone | [B] | [B] | **[B]** | [A C B] | [] (`datetime(col)` NULL for the Go-bound rows) |
 | `_time_format=sqlite` | [A B] | [] | [A B] | [C B A] | [B] |
 | `_time_format=sqlite&_timezone=UTC` | [B] | [B] | **[B]** | [A C B] | [B] |
 | `_time_format=datetime` | [A B] | [] | [A B C] | [C B A] | [] (UTC arg: [A B]) |
@@ -308,6 +310,13 @@ ascending → [A C B]:
   _timezone=UTC` (in `OpenSQLite`) keeps nanoseconds and failed only equality with a
   `CURRENT_TIMESTAMP` value (`"…01:00:00"` sorts before `"…01:00:00+00:00"`): use it when SQL never
   writes times. Integers worked when SQL wrote integers too.
+- **`_timezone=UTC` alone compares right and breaks SQL date functions.** With no `_time_format`
+  the UTC `t.String()` texts (`… +0000 UTC`) sort chronologically, so `>`, `>=` and `ORDER BY`
+  between Go-bound values were right in every column above (also 12 of 12 with arguments in UTC,
+  UTC+14 and UTC−12 at ±1 h, −1 µs and the same instant), but `datetime(col)` and `julianday(col)`
+  returned NULL for those rows: a retention `DELETE … WHERE created_at < datetime('now', '-30 days')`
+  or any ad-hoc SQL on dates silently matches nothing. Add `_time_format=sqlite`. Reported by:
+  none — test or review.
 - **Mixed formats in one column compare wrongly** (C against A and B); the DSN changes only new
   writes, so switching it on an existing database needs a data migration.
 - **`Scan` into `time.Time` parses only columns declared DATE, DATETIME or TIMESTAMP.** A TEXT,
@@ -412,6 +421,7 @@ Reported by: none — test or review.
 - Agent calls `db` inside a transaction - a hang at `MaxOpenConns(1)`, a stale read with a larger pool; an unscanned `*sql.Row` also keeps its connection.
 - Agent omits `rows.Err()` - a canceled request returns a partial list as success.
 - Agent binds `time.Time` with the default DSN or without `_timezone=UTC` - comparisons and `ORDER BY` across zones are wrong; `datetime` reads back shifted.
+- Agent sets `_timezone=UTC` without `_time_format` - Go-side comparisons pass while `datetime(col)` and `julianday(col)` are NULL, so SQL-side date filters match nothing.
 - Agent formats a value into SQL inline with `Sprintf` - injection, and gosec reports only the assigned-variable shape.
 - Agent checks only `SQLITE_CONSTRAINT_UNIQUE` - a duplicate INTEGER PRIMARY KEY (1555) slips through.
 - Agent rebuilds a referenced table in a transactional goose migration - `foreign_keys = OFF` is a no-op; `DROP TABLE` deletes the child rows.

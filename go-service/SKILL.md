@@ -86,7 +86,8 @@ go.mod, lint config and root `AGENTS.md`/`CLAUDE.md` win over this table.
   transaction.
 - **Store times in one zone and one format**: UTC; `timestamptz` in PostgreSQL; in SQLite a DSN
   with `_time_format=sqlite&_timezone=UTC` (`_time_format=datetime&_timezone=UTC` when SQL itself
-  writes timestamps) or integers. `_timezone=UTC` alone keeps the `t.String()` layout.
+  writes timestamps) or integers. `_timezone=UTC` alone keeps the `t.String()` layout: Go-bound
+  values still compare right, but `datetime(col)` and `julianday(col)` are NULL.
 - **JWTs**: pin the methods, require `exp`, check a non-empty issuer and audience
   (`WithIssuer("")` turns the check off). **Secrets**: refuse to
   start with an empty key; never log headers or whole config structs.
