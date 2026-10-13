@@ -169,6 +169,13 @@ effect is wanted.
   `Int.MAX_VALUE + 1` wraps to `Int.MIN_VALUE` with no warning, even as a constant. Make the first
   operand a `Long` (`30L * ...`), use `Duration`/`TimeUnit` for times, or `Math.addExact` and
   `multiplyExact` where overflow must fail. **Nothing** reports it.
+- **Shift counts are masked, not saturated.** `1L shl n` uses only the low six bits of `n` (`n and
+  63`) and `1 shl n` the low five, so `1L shl 64 == 1L` and `1L shl 70 == 64L`. An exponential
+  backoff written as `unit * (1L shl attempts)` wraps silently once `attempts` reaches 64, and a
+  `minOf(cap, …)` after the shift hides the wrap for most inputs. Cap the exponent before shifting
+  (`1L shl minOf(attempts, 6)`). A test for that cap must use an exponent whose wrapped value falls
+  **below** the cap (attempts 64 → `1L`): attempts 71 gives 64 units, which a 60-unit cap swallows,
+  so the test passed with the cap removed (observed 2026-10-08).
 - Division and remainder truncate toward zero: `-7 / 2 == -3`, `-7 % 2 == -1`, `(-7).mod(2) == 1`,
   `Math.floorDiv(-7, 2) == -4`. Note `-7.mod(2) == -1`: unary minus applies after the call.
 - Conversions truncate and saturate: `2.9.toInt() == 2`, `(-2.9).toInt() == -2`,
@@ -221,6 +228,7 @@ effect is wanted.
 - Agent passes arguments of the same type positionally - a swap compiles.
 - Agent destructures a data class with several same-typed properties - a reordered class swaps values silently.
 - Agent multiplies `Int` literals for a `Long` duration - overflow before widening.
+- Agent writes `1L shl attempts` for a backoff - the count is masked to six bits; a cap test needs an exponent that wraps below the cap.
 - Agent compares `BigDecimal` with `==` - scale-sensitive; `1.0 != 1.00`.
 - Agent converts a `Char` digit with `toInt()` - gets the character code.
 - Agent formats a number with `"%.2f".format(x)` for a file or API - a comma decimal separator under some locales.

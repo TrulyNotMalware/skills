@@ -336,6 +336,19 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
 - **A mocked `PlatformTransactionManager` proves nothing about atomicity.** It verifies call order
   only. Two writes split into two transactions still pass. Use the real `JpaTransactionManager` on a
   real (or embedded) database.
+- **A transaction guard needs a caller-side spec with a real transaction manager.** A mocked manager
+  never sets `TransactionSynchronizationManager.isActualTransactionActive()`, so a `check(…)` that
+  refuses (or requires) an active transaction in a repository method is invisible to the mocked-manager
+  spec of its caller. Observed 2026-10-08 (Boot 4.1.1): a guard added to a repository's CAS methods
+  would have thrown in production from a service that called one inside the same `TransactionTemplate`
+  as its notification write; the unit spec stayed green, a `DataSourceTransactionManager` over H2 failed
+  at once. Drive the guarded call through the real caller with a real manager, and check that the spec
+  fails with the guard removed.
+- **`@TransactionalEventListener` in a hand-built `AnnotationConfigApplicationContext`** (no
+  `@EnableTransactionManagement`) runs as a plain `@EventListener`: immediately, inside the
+  publishing transaction, and on rollback too. Register `TransactionalEventListenerFactory` with
+  `registerBean` before asserting after-commit handoff or no-run-on-rollback; without it those
+  assertions pass or fail for the wrong reason (Framework 7.0.9).
 - Verify committed state from a **new** transaction or `EntityManager`. Reading back in the same
   persistence context returns the cached entity, whatever the database holds.
 - **Time:** inject `Clock` everywhere and use a controllable clock in tests (`Clock.fixed`, or a small
@@ -440,6 +453,10 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
 - Agent asserts that a collection contains an element - truncation passes; assert the size.
 - Agent adds a `@SpringBootTest` to an app with `@Scheduled` jobs without gating scheduling - the
   jobs run during the test against the same database and mocks.
+- Agent pins a transaction guard (`isActualTransactionActive`) with a mocked transaction manager - the
+  flag is never set; use a real manager through the real caller.
+- Agent tests a `@TransactionalEventListener` in a hand-built context without
+  `TransactionalEventListenerFactory` - it runs as a plain listener, inside the transaction.
 
 ## Official sources
 

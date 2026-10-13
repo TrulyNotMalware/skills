@@ -200,6 +200,13 @@ class OrderNotifications(private val mailer: Mailer) {
   connections: a non-default `isolation` fails with `InvalidIsolationLevelException` (run), and
   `readOnly` no longer reaches the JDBC connection (from source). Do not use it as the fix.
 - Without an active transaction the listener is skipped by default (`fallbackExecution = false`).
+- **`@TransactionalEventListener` is transactional only where a `TransactionalEventListenerFactory`
+  is registered.** Boot's transaction auto-configuration (`@EnableTransactionManagement`) does that; a
+  hand-built `AnnotationConfigApplicationContext` with `registerBean` does not, and the annotated
+  method then runs as a plain `@EventListener`: at publish time, inside the publishing transaction,
+  and also when that transaction rolls back (Framework 7.0.9, observed in a spec that first passed
+  for the wrong reason). Register the factory, or import `@EnableTransactionManagement`, before
+  asserting after-commit behaviour there; see [testing](testing.md#transactions-time-and-concurrency-in-tests).
 - An application-wide asynchronous `ApplicationEventMulticaster` (one given a task executor) makes
   every plain `@EventListener` run on the executor, outside the publisher's transaction.
   `@TransactionalEventListener`s are still invoked on the publishing thread (Framework 6.1+); `@Async`
@@ -212,11 +219,16 @@ class OrderNotifications(private val mailer: Mailer) {
 Use `TransactionTemplate` when the boundary is dynamic or inside tests:
 
 ```kotlin
-val saved = transactionTemplate.execute { orderRepository.save(order) }!!
+val saved = transactionTemplate.execute { orderRepository.save(order) }
 transactionTemplate.executeWithoutResult { orderRepository.deleteById(id) }
 ```
 
-`execute` returns `T?`. Handle the null explicitly instead of letting it propagate.
+- The result's nullability follows the lambda (Framework 7, JSpecify:
+  `<T extends @Nullable Object> T execute(TransactionCallback<T>)` in spring-tx 7.0.9): a lambda that
+  returns a non-null type gives a non-null `T`, and a `!!` or `?: default` after it is dead code that the
+  compiler flags (Kotlin 2.4.10, seen as a warning in a `--rerun-tasks` build). A lambda that returns
+  `T?` gives `T?`. On Framework 6 `execute` was `@Nullable` for every callback and `!!` was the norm, so
+  copy the call shape from a project file compiled against the current version, not from older examples.
 
 ## Coroutines
 
@@ -268,6 +280,10 @@ Transaction behavior is invisible to unit tests that construct the service direc
 - Agent assumes an `AFTER_COMMIT` listener failure surfaces to the caller - it is only logged.
 - Agent verifies transactional behavior in the same persistence context - first-level cache makes
   the assertion pass regardless.
+- Agent writes `execute { … }!!` or `execute { … } ?: default` on Framework 7 - the result is already
+  non-null for a non-null lambda; the compiler warns and readers look for a null path that does not exist.
+- Agent asserts after-commit behaviour of a `@TransactionalEventListener` in a hand-built context
+  without `TransactionalEventListenerFactory` - it ran as a plain listener inside the transaction.
 
 ## Official sources
 

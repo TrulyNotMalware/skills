@@ -243,6 +243,12 @@ Rules:
 - Databind classes moved: `tools.jackson.databind.ObjectMapper` and
   `tools.jackson.databind.json.JsonMapper`. Check which one the project injects before adding a new
   mapper bean.
+- `JsonNode` is `Iterable<JsonNode>` **and** declares its own `map(Function<? super JsonNode, R>)`
+  that applies the function to the node itself (jackson-databind 3.2.2, `JsonNode.java:2101`). In
+  Kotlin a member wins over an extension, so `node.map { … }` is that member and yields one value,
+  not a `List`, with no warning (`EXTENSION_SHADOWED_BY_MEMBER` fires only where an extension is
+  declared). Iterate explicitly: `node.values().map { … }` for array elements, `node.properties()` for
+  object fields (`elements()`/`fields()` were the Jackson 2 names).
 - With the Kotlin module, a missing JSON field for a non-null constructor parameter without a
   default fails deserialization (400 in MVC). A parameter with a default gets the default. Decide
   per field whether "absent" means error or default; do not make everything nullable.
