@@ -1,7 +1,9 @@
 # Security: resource server, filter chains, request signatures
 
 Spring Security 7 on Boot 4.1 for Kotlin services: JWT resource servers, authorization rules,
-custom signature-verification filters, and security tests. Error-response shape for 401/403 is in
+custom signature-verification filters, and security tests. The examples are servlet (`HttpSecurity`);
+for WebFlux and Spring Cloud Gateway (`ServerHttpSecurity`, filter order, CORS on 401, multi-issuer
+reactive JWT) read [webflux-gateway](webflux-gateway.md). Error-response shape for 401/403 is in
 [web-errors](web-errors.md#security-errors-are-not-controller-errors); Actuator exposure is in
 [config-observability](config-observability.md#actuator-and-health).
 
@@ -131,7 +133,10 @@ key: wrong `aud`, wrong `iss`, and a missing `aud` are all rejected (401).
   validated with a default clock skew of 60 seconds.
 - **Several issuers (multi-tenant):** never build a decoder from whatever `iss` the token claims. Keep
   an allowlist of issuers (`JwtIssuerAuthenticationManagerResolver` with explicit issuers), validate
-  audience per issuer, and identify users by `(iss, sub)`, not `sub` alone.
+  audience per issuer, and identify users by `(iss, sub)`, not `sub` alone. `fromTrustedIssuers(...)`
+  builds each decoder through OIDC discovery (`JwtDecoders.fromIssuerLocation`, Security 7.1, from
+  source); for issuers that publish only a JWK set, pass your own issuer-to-manager lookup to the
+  constructor (the reactive form is in [webflux-gateway](webflux-gateway.md#reactive-security-defaults-and-jwt)).
 - **Authorities mapping:** by default the `scope`/`scp` claim becomes `SCOPE_<value>` authorities.
   Roles in other claims (Keycloak `realm_access.roles`, Auth0 custom namespaces, Entra `roles`) are
   **ignored** until you map them with a `JwtAuthenticationConverter`. `hasRole("ADMIN")` checks for

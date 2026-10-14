@@ -23,7 +23,7 @@ skills/
     └── reference/*.md        # 주제별 상세. SKILL.md 의 안내표로만 로드된다
 ```
 
-- 현재 스킬: `go-style` (Go 1.27 / go.mod `go` 1.26 / staticcheck 2026.2 / golangci-lint 2.14 / gopls 0.23 — 오류·nil·자료형·동시성·테스트·이름, 함정마다 잡는 도구, 프레임워크 무관), `go-service` (Go 1.27 / go.mod `go` 1.26.0 / modernc SQLite 1.60 / pgx 5.11 / golang-jwt 5.3 / franz-go 1.22 / go-redis 9.23 — net/http 서버·클라이언트·수명주기, database/sql, 인증, 설정·관측, 로그 수집 데몬, 테스트. stdlib 우선), `kotlin-spring-boot` (Boot 4.1 / Kotlin 2.4 / Gradle KTS / Kotest+MockK), `kotlin-style` (Kotlin 2.4 / ktlint 1.8 / detekt 1.23·2.0 alpha — null 안전·관용구·클래스·예외, 프레임워크 무관), `python-fastapi` (Python 3.14 / FastAPI 0.142 / Pydantic 2.13 / SQLAlchemy 2.1 async / pytest-asyncio 1.4 / uv 0.13, 쓰는 프로젝트에 한해 Alembic 1.20·tenacity 9.2·SQLModel 0.0.48), `python-style` (Python 3.14 / ruff 0.16 / mypy 2.3 / pytest 9.1, ty 0.0.86·pyright 1.1.414 대비 — 타입 어노테이션·관용구·컨벤션·테스트 함정, 프레임워크 무관), `review-remediation` (스택 무관 절차 — 리뷰 지적 반영 순서·증거 규칙·병렬 워커. 버전 표 없음, 규칙마다 위키의 사건 기록이 근거).
+- 현재 스킬: `go-style` (Go 1.27 / go.mod `go` 1.26 / staticcheck 2026.2 / golangci-lint 2.14 / gopls 0.23 — 오류·nil·자료형·동시성·테스트·이름, 함정마다 잡는 도구, 프레임워크 무관), `go-service` (Go 1.27 / go.mod `go` 1.26.0 / modernc SQLite 1.60 / pgx 5.11 / golang-jwt 5.3 / franz-go 1.22 / go-redis 9.23 — net/http 서버·클라이언트·수명주기, database/sql, 인증, 설정·관측, 로그 수집 데몬, 테스트. stdlib 우선), `kotlin-spring-boot` (Boot 4.1 / Kotlin 2.4 / Gradle KTS / Kotest+MockK, WebFlux·Spring Cloud Gateway 2025.1 참조 포함), `kotlin-style` (Kotlin 2.4 / ktlint 1.8 / detekt 1.23·2.0 alpha — null 안전·관용구·클래스·예외, 프레임워크 무관), `python-fastapi` (Python 3.14 / FastAPI 0.142 / Pydantic 2.13 / SQLAlchemy 2.1 async / pytest-asyncio 1.4 / uv 0.13, 쓰는 프로젝트에 한해 Alembic 1.20·tenacity 9.2·SQLModel 0.0.48), `python-style` (Python 3.14 / ruff 0.16 / mypy 2.3 / pytest 9.1, ty 0.0.86·pyright 1.1.414 대비 — 타입 어노테이션·관용구·컨벤션·테스트 함정, 프레임워크 무관), `review-remediation` (스택 무관 절차 — 리뷰 지적 반영 순서·증거 규칙·병렬 워커. 버전 표 없음, 규칙마다 위키의 사건 기록이 근거).
 - 이력 로그는 이 저장소에 두지 않는다. 위키 `~/workspace/llm_wiki/wiki/tech/skills-authoring.md` 에만 남긴다(위키 규칙은 그 저장소의 CLAUDE.md).
 
 ## 작성 규칙
@@ -106,7 +106,7 @@ skills/
 ## 버전 올릴 때
 
 1. `SKILL.md` 대상 버전 표 갱신(최신은 `latest-versions.sh` 로 조회).
-2. 스킬 디렉터리에서 버전 문자열을 grep 해 해당 문장만 재검증. 찾을 문자열은 각 `SKILL.md` 의 "Maintaining this skill" 절에 있다(Kotlin: `Boot 4`, `4.1`, `Framework 7`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `2.3.20`, `2.4` / Python: `FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `httpx2`, `fastapi-cli`, `uv 0.`, `ty 0.`, `pyright 1.`, `typeshed` / Go: `go ≥`, `main go ≥`, `toolchain ≥`, `1.27`, `GODEBUG`, `SA`, `golangci`, `gopls`, `go fix` 등).
+2. 스킬 디렉터리에서 버전 문자열을 grep 해 해당 문장만 재검증. 찾을 문자열은 각 `SKILL.md` 의 "Maintaining this skill" 절에 있다(Kotlin: `Boot 4`, `4.1`, `Framework 7`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `2.3.20`, `2.4`, `Spring Cloud 2025`, `Gateway Server WebFlux`, `Security 7.1` / Python: `FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `httpx2`, `fastapi-cli`, `uv 0.`, `ty 0.`, `pyright 1.`, `typeshed` / Go: `go ≥`, `main go ≥`, `toolchain ≥`, `1.27`, `GODEBUG`, `SA`, `golangci`, `gopls`, `go fix` 등).
 3. 위키 `skills-authoring.md` 의 "검증으로 뒤집힌 주장" 표 항목은 버전 경계에 걸린 것이 많다 — 우선 재실행.
 4. 위키 이력에 한 줄.
 
