@@ -90,6 +90,11 @@ right but wrong together. This skill is the order of work that catches those bef
 
 - **Open the cited file.** In one review, three false positives became visible only after
   opening the cited source.
+- **Trace the mechanism a finding describes before writing it into documentation.** A finding
+  said a lost status write would "re-deliver under a new event id"; the code's recovery sweep
+  reclaims the same row, so the id never changes and the deduplication advice written from the
+  finding was wrong. The finding was right about the risk and wrong about the path, and the
+  path was copied (caught by a cross-model review, 2026-10-12).
 - **Know who answered an external probe.** Check `server`, `WWW-Authenticate` and similar
   headers, and probe a path that does not exist as a control. A 401 from an auth proxy in front
   of the app says nothing about the app.
@@ -189,6 +194,8 @@ right but wrong together. This skill is the order of work that catches those bef
 - Agent follows this file but does not open the reference the table routes to - it rebuilds a
   defect that interactions already lists (in the incident, one counter used as both ownership token
   and give-up budget).
+- Agent documents a finding's description of a mechanism ("a new id on redelivery") without tracing
+  it - the risk is real, the path is not, and the documented mitigation targets the wrong path.
 
 ## Maintaining this skill
 

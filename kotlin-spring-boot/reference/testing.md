@@ -209,6 +209,15 @@ saved.captured.status shouldBe OrderStatus.SUBMITTED        // assert the observ
   fire-and-forget sinks (event publishers, metrics).
 - `suspend` functions need `coEvery`/`coVerify`. Plain `every` on a suspend call does not compile
   or does not match.
+- Overloaded Java methods: `any()` resolves to the most specific overload, not to "any call".
+  `verify(exactly = 0) { publisher.publishEvent(any()) }` on an `ApplicationEventPublisher` binds
+  to `publishEvent(ApplicationEvent)`; production code that publishes a plain Kotlin class goes
+  through `publishEvent(Object)`, a different method, so the "never published" check passes
+  whatever was published, and `every { publisher.publishEvent(any()) } throws ...` never fires.
+  Write `publishEvent(any<Any>())`, or `publishEvent(ofType<OrderPlaced>())` when the type
+  matters. The same applies to any Java API with an `Object` overload next to a narrower one.
+  (Measured: twelve `exactly = 0` assertions in one Kotlin service had passed against the wrong
+  overload; they surfaced only when a new event type was added next to them, 2026-10-13.)
 - Assert outcomes (returned values, captured arguments, state) rather than only interactions. A
   test that only checks `verify { }` proves the code calls something, not that the result is right.
 - Kotlin `object`s and top-level functions need `mockkObject`/`mockkStatic`, which are JVM-global.
@@ -448,6 +457,9 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
 - Agent writes a JUnit `@Test fun x() = runBlocking { ... }` - non-`Unit` return, the test is silently skipped.
 - Agent uses `Thread.sleep` for async assertions - use `eventually` or Awaitility.
 - Agent writes only interaction checks (`verify { }`) - assert the observable result too.
+- Agent writes `verify(exactly = 0) { publisher.publishEvent(any()) }` - `any()` picks the
+  `ApplicationEvent` overload, production publishes through the `Object` overload, and the check
+  passes whatever was published. Use `any<Any>()` or `ofType<Event>()`.
 - Agent relies on unit tests for a wiring change - add or extend a context-starting smoke test that asserts the chosen beans.
 - Agent trusts a green run after moving tests - an empty spec passes as one entry; read the test names, not only the count.
 - Agent asserts that a collection contains an element - truncation passes; assert the size.

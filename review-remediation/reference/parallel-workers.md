@@ -4,6 +4,9 @@ Use this when remediation or its verification is split across subagents, worktre
 concurrent scripts. The rules are about splitting work, or about running checks at the same
 time; each comes from a recorded run.
 
+Contents: [Before spawning](#before-spawning) · [While they run](#while-they-run) ·
+[Reports and patches](#reports-and-patches) · [Gotchas](#gotchas)
+
 ## Before spawning
 
 - **Fix the base commit and each worker's file ownership.**
@@ -16,6 +19,13 @@ time; each comes from a recorded run.
 - **Do not run on a worker's behalf a command the permission system denied the worker.** In the
   incident two workers had the git command that moves their base denied and stopped; re-plan the
   split instead of executing the denied command from the coordinator.
+- **The brief fixes where revert checks run, and the coordinator keeps that true.** "Reverting in
+  place is fine" holds only while nothing else reads the tree. In one run the coordinator wrote
+  that in a worker's brief and then started a code-review lane and a verifier on the same tree
+  before the worker reached its revert loop; the worker moved to a scratch copy on its own, so
+  nothing broke, but the brief had been false since the lanes started and the worker had no way
+  to know. Put the copy procedure (below) in the brief, and if you start any reader after
+  briefing, tell the worker. (2026-10-13, a Kotlin service; the move is in the worker's report.)
 
 ## While they run
 
@@ -65,6 +75,8 @@ time; each comes from a recorded run.
   file path back, and ask for "problems only, short, most important first". Keep results in the
   repository, an artifacts directory or notes rather than only under `/tmp`: a reboot once erased
   the scratch results and the unread rest of truncated reports.
+  Put the file request in the brief, before the first report: in one session four reports were
+  truncated before the coordinator switched to files (2026-10-12).
 - **Screen patches before applying them.** `git apply --numstat <patch>` lists the files a patch
   touches without applying it; reject anything outside the worker's ownership. Conflicts land in
   shared documents (`AGENTS.md`, changelogs); merge those by hand.
@@ -87,3 +99,5 @@ time; each comes from a recorded run.
 - Agent runs verification scripts that share a flag file or the same tables in parallel - the
   results corrupt each other.
 - Agent leaves worker reports only in `/tmp` - a reboot loses them.
+- Agent writes "revert in place is fine" in a worker's brief and then starts a review lane - the
+  brief was true when written, and the worker cannot see that it changed.
