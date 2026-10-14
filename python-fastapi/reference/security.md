@@ -239,7 +239,7 @@ def client_ip(request: Request) -> str | None:
 ## Webhooks
 
 Applies to signed callbacks from a provider that retries until it gets a `2xx` (FastAPI 0.142,
-SQLAlchemy 2.1; measured with uvicorn 0.54 and SQLite).
+SQLAlchemy 2.1; measured with uvicorn 0.54 on SQLite and PostgreSQL 17).
 
 ```python
 import hashlib
@@ -342,11 +342,15 @@ async def provider_webhook(
 - `hmac.compare_digest` on two `str` raises `TypeError` for a non-ASCII header value, a `500`;
   compare bytes as above.
 - Insert the event id in the transaction that applies the effect, and commit before returning.
-  When the effect fails, the id rolls back with it and the redelivery is processed. Committing the
-  id first and the effect afterwards loses the event: the effect failed with `500`, the redelivery
-  answered `duplicate`. A commit after a dependency's `yield` runs after the `200` is sent
-  ([fastapi-basics](fastapi-basics.md#dependencies-with-yield)): a failing commit there returned
-  `200` and stored nothing, and the sender does not retry.
+  When the effect fails, the id rolls back with it and the redelivery is processed. On PostgreSQL
+  a concurrent redelivery blocks on the uncommitted id until the first transaction commits, then
+  answers `duplicate` (10 simultaneous deliveries: 1 processed, 9 duplicate, no `500`, on asyncio
+  and uvloop). Committing the id first and the effect afterwards loses the event: the effect
+  failed with `500`, the redelivery answered `duplicate`. A commit after a dependency's `yield`
+  runs after the `200` is sent ([fastapi-basics](fastapi-basics.md#dependencies-with-yield)): a
+  failing commit there (PostgreSQL, a `DEFERRABLE INITIALLY DEFERRED` unique violation at
+  `COMMIT`) returned `200` and stored nothing, and the sender does not retry; with
+  `Depends(get_session, scope="function")` the same failure is a `500`.
 
 ## Server-side request forgery
 

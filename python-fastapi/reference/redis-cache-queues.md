@@ -120,12 +120,14 @@ Redis = Annotated[redis.Redis, Depends(get_redis)]
   or `EXPIRE key seconds NX` on every hit). A `Semaphore` in the process limits one worker only.
 - A limiter in front of login, password reset or sign-up is a security control. When Redis fails,
   answer `503` with `Retry-After` and keep `429` for "the limiter answered: over the limit".
-  Measured under uvicorn with Redis down: an unguarded `incr` gives `500`, and
+  Measured under uvicorn against Redis 8 (the `429` carries `Retry-After` equal to the key's
+  remaining TTL, and the next request after it is `200`) and then with Redis down: an unguarded
+  `incr` gives `500`, and
   `except RedisError: return` lets every attempt through (`200`). The `from_url` client above
   fails with `redis.exceptions.ConnectionError` at once (port closed) or
   `redis.exceptions.TimeoutError` after the 2 s `socket_connect_timeout` (host black-holed). A
-  `Redis(host=...)` client with the same timeouts retries first, about 3-5 s and 25-27 s, so its
-  fail-closed `503` also came after 25-27 s. Give the limiter's client
+  `Redis(host=...)` client with the same timeouts retries first, about 2.6-4.5 s (port closed) and
+  25-27 s (black-holed host), so its fail-closed `503` also came after 25-27 s. Give the limiter's client
   `retry=Retry(NoBackoff(), 0)` (`redis.asyncio.retry.Retry`, `redis.backoff.NoBackoff`; `503`
   after 2.0 s), or bound the call with `asyncio.timeout` and
   catch the builtin `TimeoutError` too: it is not a `RedisError`, and `except RedisError` alone

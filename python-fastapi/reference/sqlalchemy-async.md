@@ -129,11 +129,12 @@ async def add_tag_if_new(session: AsyncSession, name: str) -> bool:
 
 - A batch job (worker, cron, consumer) that loops over items on one session with a `try` per item
   isolates nothing: after the first `IntegrityError`, every later item, a read of `item.id` in the
-  `except` block, the "mark failed" flush and the final `commit()` all raised `PendingRollbackError`,
-  and none of the batch was stored, the items that succeeded included (aiosqlite; PostgreSQL not
-  run). Wrap each item in `begin_nested()` like the function above, or give each item its own
+  `except` block (for an item loaded before the failed flush; a new object still answers from
+  memory), the "mark failed" flush and the final `commit()` all raised `PendingRollbackError`, and
+  none of the batch was stored, the items that succeeded included (aiosqlite and PostgreSQL 17). Wrap each item in `begin_nested()` like the function above, or give each item its own
   session and commit. Read ids before the savepoint: one that rolls back after changing the item
-  leaves it expired, reading it raises `MissingGreenlet` (in a `StatementError`), so
+  leaves it expired, reading it raises `MissingGreenlet` (bare on asyncpg; aiosqlite wraps it in a
+  `StatementError`, so one `except` clause does not cover both drivers), so
   `await session.refresh(item)` before marking it failed. That works only for objects that were
   persistent before the savepoint; one added inside it is gone from the session, and `refresh`
   raises `InvalidRequestError: ... is not persistent within this Session`. Keep its input values
@@ -209,8 +210,13 @@ other's uncommitted changes.
   repeated another; ordered by `created_at`, an insert repeated one. Keyset pagination on an
   immutable key plus a unique tiebreaker had neither; a keyset on `updated_at` still skipped the
   edited row. Rows with equal sort keys have no defined order, so a non-unique `ORDER BY` with
-  `LIMIT` can return them on different pages (PostgreSQL docs, not run). Order by
-  `(created_at, id)` and page with a cursor:
+  `LIMIT` returns them on different pages. PostgreSQL 17, 5,000 rows sharing one `created_at`, no
+  index on it, `ORDER BY created_at LIMIT 100 OFFSET n`: one id came back on 24 pages and 23 rows
+  on none, the same on every run, because the planner sorts small offsets with top-N heapsort and
+  larger ones (from 2,400 here) with quicksort, and the two order ties differently. An index on
+  `created_at` happened to give stable pages (an index scan, not a guarantee); `(created_at, id)`
+  gave 0 duplicates and 0 missing in all 9 scenarios tried. Order by `(created_at, id)` and page
+  with a cursor:
 
 ```python
 from datetime import datetime
@@ -374,7 +380,8 @@ target_metadata = Base.metadata
   `op.create_unique_constraint(None, ...)` and a downgrade `op.drop_constraint(None, ...)`. The
   revision still exits `0`, with a comment in the file and a `UserWarning` on stderr; the
   downgrade fails with `CompileError: Can't emit DROP CONSTRAINT
-  ... it has no name` (rendered for PostgreSQL with `--sql`, not run against a server). Set the
+  ... it has no name` (PostgreSQL 17: `upgrade` succeeds and the server names the constraint
+  `<table>_<column>_key`; `downgrade` exits `1` and `current` stays at head). Set the
   convention before the first migration; with this `ck` entry, check constraints need `name=`
   (`InvalidRequestError` otherwise):
 

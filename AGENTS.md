@@ -74,6 +74,7 @@ skills/
 - 끝없이 도는 제너레이터·루프를 시험할 때는 서브프로세스로 띄우고 제한 시간 뒤 `kill -9` 한다(이벤트 루프가 점유돼 서버가 멈춘 적이 있다).
 - **라이브러리가 동봉한 공식 스킬을 대조 기준으로 쓴다(2026-10-13).** FastAPI 는 0.133.1 부터 패키지 안에 `fastapi/.agents/skills/fastapi/` 를 넣는다(설치 버전과 일치). 공식 스킬이 권하는 모양(제너레이터 엔드포인트, `fastapi run`, `def` 기본)이 실행해 보면 조용히 틀리는 조건을 갖고 있었다 — 공식 권고도 실행으로 판정한다.
 - **문서 코드 블록 스윕은 `.omc/artifacts/python-refs-2026-10-13/sweep.py`** (블록마다 compile·ruff·mypy --strict, `--changed-vs main` 이면 바뀐 블록만). 새 파일은 `git add -N` 을 해야 `git diff` 에 잡힌다 — 2026-10-14 새 testing.md 가 이 때문에 첫 스윕에서 빠졌다.
+- **공용 PostgreSQL 에서 검증할 때 (2026-10-14)**: 검증 전용 DB(`skillverify_<태그>`)를 만들어 쓰고 끝나면 지운다. 그 DB 안에서 레인 여럿이 돌면 Alembic autogenerate 는 `env.py` 의 `include_name` 으로 자기 테이블만 보게 한다 — 안 그러면 다른 레인의 테이블에 `drop_table` 이 생성되고 `upgrade` 가 그것을 지운다. 서버가 멈추는 장애(정지·풀 고갈·회복)는 공용 인스턴스가 아니라 임시 컨테이너(`postgres:17-alpine`·`redis:8`, `docker pause/unpause`·`stop`·`rm -f`)로 재현한다. 이 맥에는 `timeout` 명령이 없다 — 걸릴 수 있는 프로브는 kill -9 래퍼로 감싼다.
 - **mypy 는 번들 typeshed 로 판정한다.** typeshed main 이 `@contextmanager` 의 `Iterator` 반환을 deprecated 로 바꿨지만 mypy 2.3·2.4 는 조용했고 ty 0.0.86 만 실패했다(2026-10-13). 타입 규칙을 바꿀 근거는 최신 typeshed(`curl` 로 main 의 `.pyi`)와 ty·pyright 로도 확인한다.
 
 ### Go 스킬을 검증할 때 (2026-10-08 go-style, 2026-10-12 go-service)

@@ -160,13 +160,22 @@ def configure_logging() -> None:
 - A database error that escapes a health handler is a `500`, not a `503`, and it arrives when the
   driver gives up. Measured under uvicorn with a `SELECT 1` through the session dependency: closed
   port `500` at once, black-holed host `500` after 60 s (asyncpg 0.31's connect timeout), exhausted
-  pool `500` after 30 s (`pool_timeout`; `pool_size=1, max_overflow=0`, SQLite), and a server that
-  accepts the connection and then stops answering: no response in 300 s.
-- `asyncio.timeout` around the check does not bound that last case, and neither do asyncpg's
-  `timeout` and `command_timeout` in `connect_args`: no response in 15 s, on both event loops. The
+  pool `500` after 30 s (`pool_timeout`; `pool_size=1, max_overflow=0`; SQLite, and PostgreSQL 17
+  at 30.02 s), and a server that accepts the connection and then stops answering: on a pooled
+  connection no response at all (300 s against a fake server; until the server resumed against a
+  paused PostgreSQL 17), while a new connect to it fails with `500` after asyncpg's 60 s connect
+  timeout.
+- `asyncio.timeout` around the check does not bound a stall on an established connection, and
+  neither do asyncpg's `timeout` and `command_timeout` in `connect_args`: no response in 15 s
+  against the fake server and in 60 s against a paused PostgreSQL 17, on both event loops. The
   cancelled check waits in asyncpg's `Connection.close()`, which SQLAlchemy awaits to clean up
-  (with `timeout=2`, from source) and which did not return. Run the check in a task the app owns
-  and wait on `asyncio.shield(task)`; the timeout then cancels the wait, not the check:
+  (`timeout=2`) and which first awaits the server's reply to its cancel request (from source); a
+  server that does not process the cancel request never answers it. A stalled new connect is
+  bounded (`503` at 2.0 s), and so is a live but slow server: with the check's table locked,
+  `asyncio.timeout(2)` answered `503` and `command_timeout=2` answered `500` at 2.0-2.1 s, because
+  PostgreSQL answers the cancel request (the connection is then closed, not returned to the pool).
+  Run the check in a task the app owns and wait on `asyncio.shield(task)`; the timeout then
+  cancels the wait, not the check:
 
 ```python
 import asyncio
@@ -236,19 +245,23 @@ async def readyz(request: Request, response: Response) -> dict[str, str]:
 
 - With this handler the stalled, closed, black-holed and exhausted-pool cases answered `503` within
   2 s on asyncio and uvloop, also to 20 concurrent probes; the pool served the next check, and
-  shutdown on SIGTERM took 0.1-0.2 s. The stalled server was a fake that speaks the PostgreSQL
-  handshake; real PostgreSQL not run.
+  shutdown on SIGTERM took 0.1-0.2 s (1.4 s with a probe in flight). Measured against a fake
+  server that speaks the PostgreSQL handshake and then stays silent, and again against a paused
+  PostgreSQL 17, with the same results.
 - Join only a recent check. A joined check has no bound of its own, and one stuck on a dead socket
   ends only when the socket does (asyncpg 0.31 sets no TCP keepalive, from source). Joining any
   running check kept every probe at `503` for 30 s after the database was back (SQLite simulation:
   only the first connect hangs); with the window, a new check started after 5 s and answered
   `200`. Against a server that stays silent the handler held two checks and two connections, not
   one per probe.
-- The limit: with two stuck checks no new one starts, and readiness stays `503` until one ends,
-  which on a silent socket is never. Two connects that hung through an 8 s outage kept all 37
-  probes at `503` for 45 s after it ended; a process restart answered `200` at once, so only a
-  restart (a deploy, or one your alerting triggers; the dependency-free `/livez` does not fail)
-  recovers it.
+- The limit: with two stuck checks no new one starts, and readiness stays `503` until one ends.
+  Against a peer that keeps the socket open and never answers (the fake server) that is never:
+  two connects that hung through an 8 s outage kept all 37 probes at `503` for 45 s after it
+  ended, and only a process restart (a deploy, or one your alerting triggers; the dependency-free
+  `/livez` does not fail) answered `200`. A real PostgreSQL 17 ended the stuck checks itself:
+  after an 8 s `docker pause` the first probe after unpause was `200`; after the container was
+  removed and recreated, `200` came within 0.5 s of it accepting connections; after a healed
+  network partition the next probe was `200` (the stuck check ended 0.5-5 s after the heal).
 - Do not cancel a stuck check to replace it: after one cancel it waited in SQLAlchemy's shielded
   close, after a second the task ended but the server still saw the connection open a second
   later, and SQLAlchemy logged two tracebacks at `ERROR`.
@@ -289,8 +302,8 @@ async def readyz(request: Request, response: Response) -> dict[str, str]:
 - Agent relies on the SDK's `atexit` flush - it does not run on SIGTERM; flush in `lifespan`.
 - Agent makes readiness depend on the database - every replica goes unready together.
 - Agent writes the health endpoint as a `def` - it queues behind slow threadpool work.
-- Agent lets a database error escape a health check - `500` instead of `503`, after 60 s (black-holed host), 30 s (exhausted pool) or never (a server that stops answering).
-- Agent bounds a readiness query with `asyncio.timeout` or asyncpg's `command_timeout` - a server that stops answering mid-query still hangs the check; wait on a shielded task the app owns.
+- Agent lets a database error escape a health check - `500` instead of `503`, after 60 s (black-holed host), 30 s (exhausted pool) or never (a pooled connection to a server that stops answering; a new connect to it is `500` after 60 s).
+- Agent bounds a readiness query with `asyncio.timeout` or asyncpg's `command_timeout` - a server that stops answering mid-query on an established connection still hangs the check (a live but slow server is bounded: it answers the cancel request); wait on a shielded task the app owns.
 - Agent lets every readiness probe join the running check - one check stuck on a dead socket keeps readiness at `503` after the database is back; join only a recent check.
 - Agent catches only `SQLAlchemyError` in a readiness check - a refused asyncpg connection is a builtin `ConnectionRefusedError`; still `500`.
 
