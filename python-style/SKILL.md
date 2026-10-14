@@ -3,15 +3,15 @@ name: python-style
 description: >
   How to write Python: complete type annotations, Pythonic idioms, naming and code conventions, and
   the pitfalls that run without error. Use when writing, reviewing, refactoring, or debugging any
-  Python code (scripts, CLIs, libraries, services, tests): function signatures and type hints
-  (parameters, return types, generics, Protocol, TypedDict, dataclasses, Enum), mypy or ruff
-  findings, default arguments, comprehensions and iteration, truthiness and None handling, string,
-  number and datetime handling, exceptions and cleanup, context managers, thread and process pools,
-  logging, imports, naming, lint and type-check configuration, and ty or pyright instead of mypy.
-  Also use when Python code "works but returns the wrong thing" (a default that is shared between
-  calls, a zero treated as missing, a comparison that is always False, a check that never runs).
-  Framework specifics live elsewhere: use python-fastapi together with this skill for FastAPI,
-  Pydantic, SQLAlchemy and asyncio service code.
+  Python code (scripts, CLIs, libraries, services, pytest tests and mocks): function signatures and
+  type hints (parameters, return types, generics, Protocol, TypedDict, dataclasses, Enum), mypy or
+  ruff findings, default arguments, comprehensions, truthiness and None, string, number and datetime
+  handling, exceptions and cleanup, context managers, thread and process pools, logging, imports,
+  naming, lint and type-check configuration, and ty or pyright instead of mypy. Also use when Python
+  code "works but returns the wrong thing" (a default that is shared between calls, a zero treated
+  as missing, a comparison that is always False, a check that never runs). Framework specifics live
+  elsewhere: use python-fastapi together with this skill for FastAPI, Pydantic, SQLAlchemy and
+  asyncio service code.
 ---
 
 # Python style
@@ -24,15 +24,16 @@ the matching reference before writing or reviewing code in that area.
 
 ## Target versions
 
-Verified 2026-10-01 by running code on these versions, extended 2026-10-13. Version-bound
-statements are tagged `(Python 3.14)`, `(ruff 0.16)`, `(mypy 2.3)`, `(ty 0.0.86)` or
-`(pyright 1.1.414)`.
+Verified 2026-10-01 by running code on these versions, extended 2026-10-13 and 2026-10-14.
+Version-bound statements are tagged `(Python 3.14)`, `(ruff 0.16)`, `(mypy 2.3)`, `(pytest 9.1)`,
+`(ty 0.0.86)` or `(pyright 1.1.414)`.
 
 | Component | Baseline | Notes |
 |---|---|---|
 | Python | 3.14 | Lazy annotations (PEP 649); inline type parameters (PEP 695); `except A, B:` without parentheses |
 | ruff | 0.16 | Linter and formatter; `B909` and `PLW1514` are still preview rules |
 | mypy | 2.3 | `strict = true`; no implicit `Optional` |
+| pytest | 9.1 | The testing reference; `unittest.mock` from the standard library |
 | ty, pyright | 0.0.86, 1.1.414 | Only where a project uses them instead of mypy; they report less by default |
 
 The project's own configuration wins. Read `pyproject.toml` (or `ruff.toml`, `mypy.ini`,
@@ -80,6 +81,7 @@ interpreter that actually runs the code.
 |---|---|
 | Function signatures, return types, generics, `Any` vs `object`, `X \| None`, `TYPE_CHECKING` imports, `Protocol` and `runtime_checkable`, `TypedDict`, `NewType`, `Enum` exhaustiveness, `@override`, context manager return types, what mypy does and does not check, ty or pyright instead of mypy | [reference/typing.md](reference/typing.md) |
 | Loops and comprehensions, default arguments, shared mutable state, closures, `zip`, generators, truthiness and `None`, `match`, strings, floats, NaN and money, datetimes, encodings, exceptions and cleanup, `@contextmanager`, `subprocess`, thread and process pool futures, caching | [reference/idioms.md](reference/idioms.md) |
+| Writing or fixing tests: fixtures, `monkeypatch`, `unittest.mock` patches and `reset_mock`, captured output (`capsys`, `capfd`, `caplog`), `pytest.approx`, which copy of the package the tests import (`--import-mode`, `python -m pytest`), tests that pass on buggy code | [reference/testing.md](reference/testing.md) |
 | Naming, shadowed builtins and module names, keyword-only parameters, dataclass options, imports and import-time work, `from` imports of mutable settings, `__main__` guard, exception hierarchy and constructors, where to catch `Exception`, logging and `extra`, comments and docstrings, ruff and mypy configuration, lint and format order, version floor per tool | [reference/structure.md](reference/structure.md) |
 
 ## Gotchas
@@ -117,6 +119,16 @@ says which tool, if any, reports the problem.
   See [structure](reference/structure.md#tooling).
 - Agent annotates a `@contextmanager` function `-> Iterator[T]` - current typeshed deprecates that
   overload and ty fails on it; write `Generator[T]`.
+- Agent patches `sys.stdout` or `sys.stderr` in a fixture - pytest's capture undoes it; an
+  assertion that nothing was printed passes with the bug present.
+  See [testing](reference/testing.md#captured-output).
+- Agent builds the object under test in `setup_method` or a fixture, the object stores its
+  dependency, and the test patches that dependency with `@patch` without asserting on the mock -
+  the real dependency runs and the test passes.
+- Agent names an exception class `ConnectionError` or `TimeoutError` - `except` clauses in that
+  module stop catching the builtin ones.
+- Agent deprecates with `DeprecationWarning` and no `stacklevel=2` - nobody sees it outside a test
+  run; even with it, only a main script's direct calls show it.
 - Agent swaps mypy `strict` for ty or pyright's default mode - unannotated parameters, bare `list`
   and returned `Any` stop being reported.
   See [typing](reference/typing.md#when-the-project-uses-ty-or-pyright).
@@ -129,7 +141,7 @@ says which tool, if any, reports the problem.
 ## Maintaining this skill
 
 When bumping the target versions: update the table above, then grep this directory for `Python 3.`,
-`3.14`, `ruff 0.`, `mypy 2.`, `ty 0.`, `pyright 1.`, `typeshed`, `preview`, `PEP 6` and `PEP 7`, and
-re-run each tagged statement. Rule codes change status between ruff releases (preview to stable,
-renames); re-run the pitfall-to-rule mapping in `reference/idioms.md`. The change history is kept
-outside this directory, in the author's wiki.
+`3.14`, `ruff 0.`, `mypy 2.`, `pytest 9.`, `ty 0.`, `pyright 1.`, `typeshed`, `preview`, `PEP 6` and
+`PEP 7`, and re-run each tagged statement. Rule codes change status between ruff releases (preview
+to stable, renames); re-run the pitfall-to-rule mapping in `reference/idioms.md`. The change history
+is kept outside this directory, in the author's wiki.

@@ -106,6 +106,12 @@ if __name__ == "__main__":
 
 - One base exception per package (`class OrdersError(Exception)`), specific subclasses below it.
   Callers can catch the base; nobody has to catch `Exception`.
+- Do not name an exception class after a builtin (`ConnectionError`, `TimeoutError`). In its module,
+  and in every module that imports the name, `except ConnectionError` then catches only yours: a
+  `ConnectionResetError` from a socket escapes, and so does the `TimeoutError` of `asyncio.timeout`.
+  ruff `A001` reports the class and `A004` the import; mypy does not. Use a prefixed name, and
+  inherit from both (`class OrdersTimeoutError(OrdersError, TimeoutError)`) when existing
+  `except TimeoutError` handlers should catch it.
 - Raise built-in exceptions for programmer errors (`ValueError`, `TypeError`, `KeyError`), your
   own for domain failures. Do not raise bare `Exception`.
 - Catch bare `Exception` only at an isolation boundary: one item of a batch, one message in a
@@ -144,6 +150,16 @@ class RateLimitError(ApiError):
 - Do not return `None`, `False` or `-1` to signal failure from a function that normally returns
   a value. Raise, or make the absence part of the type (`User | None`) when "not found" is an
   ordinary outcome.
+- A `DeprecationWarning` is shown under the default warning filters only when it is attributed to
+  `__main__`. `warnings.warn` with the default `stacklevel=1` attributes it to the module that calls
+  `warn`: shown for a function defined in the main script, never for one in a library module. With
+  `stacklevel=2`, or `@warnings.deprecated` (Python 3.13+), it is attributed to the caller: shown
+  for calls written in the main script, hidden for calls from any other module, which is where a
+  library is usually called from. pytest and `python -X dev` show all of them.
+  Pass `stacklevel=2` (ruff `B028`), and use `FutureWarning`, shown by default, for a change end
+  users must notice at runtime. mypy reports calls to `@deprecated` functions, typeshed's included
+  (`datetime.utcnow`), only with the `deprecated` error code, which `strict` does not enable
+  (mypy 2.3); the configuration below enables it.
 - The details are in [idioms](idioms.md#exceptions).
 
 ## Logging
@@ -208,7 +224,7 @@ ignore = ["TRY003"]
 python_version = "3.14"
 strict = true
 warn_unreachable = true
-enable_error_code = ["ignore-without-code"]
+enable_error_code = ["ignore-without-code", "deprecated"]
 ```
 
 - Before reporting a change as done, run `ruff check` without `--fix` and read it, then
@@ -218,6 +234,15 @@ enable_error_code = ["ignore-without-code"]
 - ruff and mypy overlap but neither replaces the other: `ANN` insists on `-> None` for every
   `__init__`, which mypy `strict` does only when no parameter is annotated; mypy rejects a bare
   `list` or `dict`, which ruff does not.
+- ruff `F811` (a name redefined before it is used) skips function and class definitions whose
+  names match `dummy-variable-rgx`, and the default pattern matches names that start with `_` (and
+  do not also end with one). Two module-level `def _parse` (a merge that kept both sides) are not
+  reported, not even with `--select ALL --preview`, and the first one is dead code; a repeated
+  `import json as _json` is reported. mypy reports it (`no-redef`, on by default). Without
+  mypy, set `dummy-variable-rgx = "^_$"`; an unused local `_name = f()` then reports `F841`.
+- Before relying on a rule to guard something, write the violation once and see the tool report
+  it. A selected rule can still skip the case: `F811` above, `B005` on `".csv"`
+  ([idioms](idioms.md#strings-numbers-and-time)).
 - Adopt the selection above only in a new project. In an existing one, keep its rule set and
   write code that would also pass these.
 - The configuration above assumes the project's oldest supported Python is 3.14. When
@@ -255,6 +280,9 @@ enable_error_code = ["ignore-without-code"]
 - Agent catches `Exception` in a batch or worker loop and logs only the message - the traceback is lost; use `logger.exception` or `exc_info=True`.
 - Agent runs `ruff format` or `ruff check --fix` before reading the lint output - a missing comma between two strings is merged away and nothing reports it.
 - Agent sets ruff `target-version` above `requires-python` and applies unsafe fixes - the code no longer parses on the oldest supported Python.
+- Agent names an exception class `ConnectionError` or `TimeoutError` - `except ConnectionError` in that module and its importers no longer catches `ConnectionResetError`, and `except TimeoutError` misses `asyncio.timeout`.
+- Agent deprecates with `warnings.warn(..., DeprecationWarning)` and no `stacklevel=2` - nobody sees the warning outside a test run or `python -X dev`; even with it, only a main script's direct calls show it.
+- Agent relies on ruff `F811` to find a helper defined twice - definitions whose names start with `_` are skipped and the first one is dead code.
 
 ## Official sources
 

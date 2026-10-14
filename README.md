@@ -79,6 +79,7 @@ for reading and are not part of this repository:
 - https://github.com/astral-sh/claude-code-plugins (Apache-2.0 or MIT)
 - https://github.com/trailofbits/skills, `plugins/modern-python` (CC BY-SA 4.0; used as a topic checklist only)
 - https://github.com/google/styleguide, `pyguide.md` (CC BY 3.0)
+- https://github.com/wdm0006/python-skills, `skills/python` (MIT)
 - https://github.com/samber/cc-skills-golang (MIT)
 - https://github.com/JetBrains/go-modern-guidelines (Apache-2.0)
 - https://github.com/cxuu/golang-skills (Apache-2.0)

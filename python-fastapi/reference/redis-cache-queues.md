@@ -118,6 +118,19 @@ Redis = Annotated[redis.Redis, Depends(get_redis)]
   with no TTL, and every later request sees a count above 1 and never sets one, so the client is
   limited forever. Decide on the value `INCR` returns and set the expiry atomically (a Lua script,
   or `EXPIRE key seconds NX` on every hit). A `Semaphore` in the process limits one worker only.
+- A limiter in front of login, password reset or sign-up is a security control. When Redis fails,
+  answer `503` with `Retry-After` and keep `429` for "the limiter answered: over the limit".
+  Measured under uvicorn with Redis down: an unguarded `incr` gives `500`, and
+  `except RedisError: return` lets every attempt through (`200`). The `from_url` client above
+  fails with `redis.exceptions.ConnectionError` at once (port closed) or
+  `redis.exceptions.TimeoutError` after the 2 s `socket_connect_timeout` (host black-holed). A
+  `Redis(host=...)` client with the same timeouts retries first, about 3-5 s and 25-27 s, so its
+  fail-closed `503` also came after 25-27 s. Give the limiter's client
+  `retry=Retry(NoBackoff(), 0)` (`redis.asyncio.retry.Retry`, `redis.backoff.NoBackoff`; `503`
+  after 2.0 s), or bound the call with `asyncio.timeout` and
+  catch the builtin `TimeoutError` too: it is not a `RedisError`, and `except RedisError` alone
+  answered `500` after the 1 s timeout. An in-process fallback counter is per worker
+  ([packaging-tooling](packaging-tooling.md#serving)).
 
 ## Job queues (arq)
 
@@ -177,6 +190,10 @@ async def enqueue_report(report_id: str) -> str | None:
 - Agent treats a pipeline as a rollback-capable transaction - after an execution error the other commands stay applied.
 - Agent implements a rate limit with `get` then `incr` - concurrent requests slip through.
 - Agent sets the rate-limit expiry only when the count is 1 - one crashed request leaves a counter without TTL and a client blocked forever.
+- Agent lets an auth rate limiter fail open on `RedisError` - unlimited login attempts while Redis is down.
+- Agent leaves the limiter's Redis call unguarded - every login is a `500` while Redis is down, after about 25 s with `Redis(host=...)` and a black-holed host.
+- Agent fails the limiter closed with a retrying `Redis(host=...)` client - the `503` comes after 25-27 s on a black-holed host; use `retry=Retry(NoBackoff(), 0)`.
+- Agent bounds a Redis call with `asyncio.timeout` and catches only `RedisError` - the builtin `TimeoutError` escapes; `500`.
 - Agent ignores the return value of `enqueue_job` with `_job_id` - duplicates are silently dropped as `None`.
 - Agent expects failed jobs to be retried - only `arq.Retry` (and worker shutdown) retries.
 - Agent re-enqueues a finished job with the same `_job_id` - dropped while the result is kept.
