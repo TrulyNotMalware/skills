@@ -157,6 +157,106 @@ def configure_logging() -> None:
   consider degraded rather than unready.
 - A `def` health handler waits in the threadpool queue behind slow requests; make it `async def`
   and dependency-free so it reflects the process, not the pool.
+- A database error that escapes a health handler is a `500`, not a `503`, and it arrives when the
+  driver gives up. Measured under uvicorn with a `SELECT 1` through the session dependency: closed
+  port `500` at once, black-holed host `500` after 60 s (asyncpg 0.31's connect timeout), exhausted
+  pool `500` after 30 s (`pool_timeout`; `pool_size=1, max_overflow=0`, SQLite), and a server that
+  accepts the connection and then stops answering: no response in 300 s.
+- `asyncio.timeout` around the check does not bound that last case, and neither do asyncpg's
+  `timeout` and `command_timeout` in `connect_args`: no response in 15 s, on both event loops. The
+  cancelled check waits in asyncpg's `Connection.close()`, which SQLAlchemy awaits to clean up
+  (with `timeout=2`, from source) and which did not return. Run the check in a task the app owns
+  and wait on `asyncio.shield(task)`; the timeout then cancels the wait, not the check:
+
+```python
+import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
+
+from fastapi import FastAPI, Request, Response, status
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+DATABASE_URL = "postgresql+asyncpg://app:secret@localhost:5432/app"
+CHECK_WINDOW = 5.0  # seconds a running check may be joined: a few probe periods
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
+    engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+    checks: dict[asyncio.Task[bool], float] = {}  # running checks -> start time
+    try:
+        yield {"engine": engine, "checks": checks}
+    finally:
+        for task in checks:
+            task.cancel()
+        await engine.dispose()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+async def database_ready(engine: AsyncEngine) -> bool:
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except (SQLAlchemyError, OSError, TimeoutError):
+        return False  # raised, it is logged once no probe waits for it
+    return True
+
+
+def current_check(request: Request) -> asyncio.Task[bool] | None:
+    checks: dict[asyncio.Task[bool], float] = request.state.checks
+    now = asyncio.get_running_loop().time()
+    for task, started in checks.items():
+        if now - started < CHECK_WINDOW:
+            return task  # join a recent check
+    if len(checks) > 1:
+        return None  # keep at most one stale check, or stuck ones pile up
+    task = asyncio.create_task(database_ready(request.state.engine))
+    checks[task] = now
+    task.add_done_callback(lambda done: checks.pop(done, None))
+    return task
+
+
+@app.get("/readyz")
+async def readyz(request: Request, response: Response) -> dict[str, str]:
+    task = current_check(request)
+    ready = False
+    if task is not None:
+        with suppress(TimeoutError):
+            async with asyncio.timeout(2):
+                ready = await asyncio.shield(task)  # a timeout cancels the wait only
+    if not ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "unavailable"}
+    return {"status": "ok"}
+```
+
+- With this handler the stalled, closed, black-holed and exhausted-pool cases answered `503` within
+  2 s on asyncio and uvloop, also to 20 concurrent probes; the pool served the next check, and
+  shutdown on SIGTERM took 0.1-0.2 s. The stalled server was a fake that speaks the PostgreSQL
+  handshake; real PostgreSQL not run.
+- Join only a recent check. A joined check has no bound of its own, and one stuck on a dead socket
+  ends only when the socket does (asyncpg 0.31 sets no TCP keepalive, from source). Joining any
+  running check kept every probe at `503` for 30 s after the database was back (SQLite simulation:
+  only the first connect hangs); with the window, a new check started after 5 s and answered
+  `200`. Against a server that stays silent the handler held two checks and two connections, not
+  one per probe.
+- The limit: with two stuck checks no new one starts, and readiness stays `503` until one ends,
+  which on a silent socket is never. Two connects that hung through an 8 s outage kept all 37
+  probes at `503` for 45 s after it ended; a process restart answered `200` at once, so only a
+  restart (a deploy, or one your alerting triggers; the dependency-free `/livez` does not fail)
+  recovers it.
+- Do not cancel a stuck check to replace it: after one cancel it waited in SQLAlchemy's shielded
+  close, after a second the task ended but the server still saw the connection open a second
+  later, and SQLAlchemy logged two tracebacks at `ERROR`.
+- Return `False` from the check instead of raising. On Python 3.14 a shielded check that fails
+  after its probes stopped waiting is logged at `ERROR` ("exception in shielded future"): once per
+  60 s check against a black-holed host; none with the `bool` check.
+- A refused asyncpg connection escapes as the builtin `ConnectionRefusedError`, not as a
+  SQLAlchemy error, so `except SQLAlchemyError` alone still gives `500`.
 - Exclude probes from access logs, metrics and tracing (a filter on the route path), or they
   dominate all three.
 - Do not put secrets or version details that identify vulnerable dependencies into the health
@@ -189,6 +289,10 @@ def configure_logging() -> None:
 - Agent relies on the SDK's `atexit` flush - it does not run on SIGTERM; flush in `lifespan`.
 - Agent makes readiness depend on the database - every replica goes unready together.
 - Agent writes the health endpoint as a `def` - it queues behind slow threadpool work.
+- Agent lets a database error escape a health check - `500` instead of `503`, after 60 s (black-holed host), 30 s (exhausted pool) or never (a server that stops answering).
+- Agent bounds a readiness query with `asyncio.timeout` or asyncpg's `command_timeout` - a server that stops answering mid-query still hangs the check; wait on a shielded task the app owns.
+- Agent lets every readiness probe join the running check - one check stuck on a dead socket keeps readiness at `503` after the database is back; join only a recent check.
+- Agent catches only `SQLAlchemyError` in a readiness check - a refused asyncpg connection is a builtin `ConnectionRefusedError`; still `500`.
 
 ## Official sources
 

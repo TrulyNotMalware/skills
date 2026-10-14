@@ -5,7 +5,8 @@ ways: loudly at a version boundary (every login breaks after an upgrade), or sil
 what it should reject. Both kinds are listed.
 
 Contents: [Bearer tokens](#bearer-tokens) · [Passwords](#passwords) · [CORS](#cors) ·
-[Other headers and hosts](#other-headers-and-hosts) · [Gotchas](#gotchas)
+[Other headers and hosts](#other-headers-and-hosts) · [Webhooks](#webhooks) ·
+[Server-side request forgery](#server-side-request-forgery) · [Gotchas](#gotchas)
 
 ## Bearer tokens
 
@@ -190,6 +191,9 @@ app.add_middleware(
   is case-sensitive, ignores `X-Forwarded-Host`, and `*.example.com` does not match
   `example.com`. Test clients send `testserver` by default
   ([testing](testing.md#choosing-a-client)).
+- `docs_url=None` alone leaves `/redoc` and `/openapi.json` public; use `openapi_url=None`
+  ([fastapi-basics](fastapi-basics.md#routing)). The default `422` body echoes request input,
+  including sibling secret fields ([web-errors](web-errors.md#validation-errors)).
 - Client addresses and scheme behind a proxy come from `X-Forwarded-*`; uvicorn trusts them only
   from `--forwarded-allow-ips` (default `127.0.0.1,::1`). With the wrong setting
   `request.client.host` is the proxy and `request.url.scheme` is `http`: `url_for` builds
@@ -198,9 +202,216 @@ app.add_middleware(
 - Rate limiting keyed on `request.client.host` puts every client in one bucket when the proxy's
   forwarded headers are not trusted or not sent; with a correct `--forwarded-allow-ips` the
   clients are distinguished.
-- `docs_url=None` alone leaves `/redoc` and `/openapi.json` public; use `openapi_url=None`
-  ([fastapi-basics](fastapi-basics.md#routing)). The default `422` body echoes request input,
-  including sibling secret fields ([web-errors](web-errors.md#validation-errors)).
+- List every proxy hop in `--forwarded-allow-ips`; CIDR ranges work (uvicorn 0.54). uvicorn then
+  takes the right-most `X-Forwarded-For` entry that is not trusted. With a CDN in front of a listed
+  load balancer but not listed itself, `request.client.host` is the CDN's address for every client.
+- When the proxies' addresses cannot be listed (a managed load balancer), derive the client from
+  the header: count from the **right** as many entries as there are proxies that append to it.
+  `chain[-(hops + 1)]` (as popular guides suggest) is one too far: with one load balancer it is the
+  value the client sent, so every rotated value gets a fresh rate-limit bucket. With the helper
+  below behind uvicorn `--forwarded-allow-ips '*'`, rotated left-most values shared one bucket. It
+  is safe only when the app is reachable through those proxies alone: a direct caller writes the
+  whole header. Read `getlist`: `headers.get` returns only the first line when the client sent its
+  own header and the proxy added a second one (Starlette 1.7).
+
+```python
+from ipaddress import ip_address
+
+from fastapi import Request
+
+TRUSTED_HOPS = 1  # proxies in front of the app that append to X-Forwarded-For
+
+
+def client_ip(request: Request) -> str | None:
+    chain = [
+        part.strip()
+        for line in request.headers.getlist("x-forwarded-for")
+        for part in line.split(",")
+    ]
+    if len(chain) < TRUSTED_HOPS:
+        return None  # not via the proxies: reject, or use a separate bucket
+    try:
+        return str(ip_address(chain[-TRUSTED_HOPS]))
+    except ValueError:
+        return None
+```
+
+## Webhooks
+
+Applies to signed callbacks from a provider that retries until it gets a `2xx` (FastAPI 0.142,
+SQLAlchemy 2.1; measured with uvicorn 0.54 and SQLite).
+
+```python
+import hashlib
+import hmac
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+DATABASE_URL = "postgresql+asyncpg://app:secret@localhost:5432/app"
+WEBHOOK_SECRET = b"replace-from-settings"
+MAX_BODY = 256 * 1024
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class ProcessedEvent(Base):
+    __tablename__ = "processed_event"
+    id: Mapped[str] = mapped_column(primary_key=True)
+
+
+class Payment(Base):  # the effect of an event
+    __tablename__ = "payment"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[str]
+    status: Mapped[str]
+
+
+class Event(BaseModel):
+    id: str
+    type: str
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, object]]:
+    engine = create_async_engine(DATABASE_URL)  # tables come from migrations
+    try:
+        yield {"sessionmaker": async_sessionmaker(engine, expire_on_commit=False)}
+    finally:
+        await engine.dispose()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    async with request.state.sessionmaker() as session:
+        yield session
+
+
+async def read_body(request: Request) -> bytes:
+    body = bytearray()
+    async for chunk in request.stream():  # chunked bodies have no Content-Length
+        body += chunk
+        if len(body) > MAX_BODY:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE)
+    return bytes(body)
+
+
+@app.post("/webhooks/provider")
+async def provider_webhook(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    signature: Annotated[str, Header(alias="X-Signature")] = "",
+) -> dict[str, str]:
+    raw = await read_body(request)
+    expected = hmac.new(WEBHOOK_SECRET, raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected.encode(), signature.encode()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED)
+    event = Event.model_validate_json(raw)  # parse only after the signature holds
+    session.add(ProcessedEvent(id=event.id))
+    try:
+        await session.flush()  # a redelivery fails here, before the effect
+    except IntegrityError:
+        await session.rollback()
+        return {"status": "duplicate"}
+    session.add(Payment(event_id=event.id, status=event.type))  # same transaction
+    await session.commit()  # before the 2xx: the sender stops retrying on success
+    return {"status": "processed"}
+```
+
+- Verify over the raw bytes (`await request.body()`, or the capped `request.stream()` read above).
+  They are the bytes the sender signed, also on a route that declares a body model;
+  `model_dump_json()` of the parsed model differs (key order, spaces), so a signature over it never
+  matches.
+- Cap the body before verifying it: nothing else limits it (uvicorn 0.54 read a 32 MiB unsigned
+  body in full before the `401`). A `Content-Length` check alone misses chunked requests: a 1 MiB
+  chunked body passed it and was read whole. The `request.stream()` loop above answered `413` for
+  1 MiB with and without `Content-Length`.
+- Declare no body model on the route. With one, FastAPI validates before the handler runs: an
+  unsigned malformed request gets `422` with its input echoed, and the signature is never checked.
+  Parse with `model_validate_json` after verifying.
+- `hmac.compare_digest` on two `str` raises `TypeError` for a non-ASCII header value, a `500`;
+  compare bytes as above.
+- Insert the event id in the transaction that applies the effect, and commit before returning.
+  When the effect fails, the id rolls back with it and the redelivery is processed. Committing the
+  id first and the effect afterwards loses the event: the effect failed with `500`, the redelivery
+  answered `duplicate`. A commit after a dependency's `yield` runs after the `200` is sent
+  ([fastapi-basics](fastapi-basics.md#dependencies-with-yield)): a failing commit there returned
+  `200` and stored nothing, and the sender does not retry.
+
+## Server-side request forgery
+
+Applies when the service fetches a URL a user supplied (link previews, imports, callbacks it
+calls). Python 3.14.0, httpx 0.28.
+
+- Check the addresses the name resolves to, not the host string: `ip_address("2130706433")`
+  raises `ValueError`, while `getaddrinfo` resolves it (also `0x7f000001` and `127.1`) to
+  `127.0.0.1` (macOS resolver).
+- `is_private` is `False` for carrier-grade NAT `100.64.0.0/10`. `not is_global` catches that and
+  IPv4-mapped addresses (`::ffff:127.0.0.1`), but `is_global` is `True` for NAT64
+  `64:ff9b::7f00:1` and IPv4-compatible `::127.0.0.1`, which embed `127.0.0.1`. A deny list of
+  `IPv4Network`s never matches an `IPv6Address`; unwrap `ipv4_mapped` first.
+- Connect to the address you checked. Validating the name and then calling `client.get(url)`
+  resolves it again: with a resolver whose second answer differed (simulated), the request reached
+  the internal server. Pin the IP in the URL, send the original `Host`, and pass
+  `extensions={"sni_hostname": host}`; without it TLS checks the certificate against the IP and
+  fails.
+- httpx pools connections by the URL's host, here the pinned IP. On a shared client a second
+  hostname reused the TLS connection verified for the first name, and its own certificate was never
+  checked. With `http2=True` that happened even with `max_keepalive_connections=0`, when the second
+  request was sent while the first was in flight (3 of 3 runs, hypercorn over HTTP/2). The snippet
+  therefore opens a client per call.
+- `client.get()` follows the client's redirect setting: a caller's client with
+  `follow_redirects=True` went from the checked host to `http://[::1]/`. The snippet's own client
+  sets `follow_redirects=False`; check each hop yourself if redirects are needed.
+
+```python
+import ipaddress
+import socket
+
+import anyio
+import httpx
+
+NAT64 = ipaddress.ip_network("64:ff9b::/96")
+IPV4_COMPATIBLE = ipaddress.ip_network("::/96")
+
+
+def is_public(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped
+        elif addr in NAT64 or addr in IPV4_COMPATIBLE:
+            addr = ipaddress.IPv4Address(int(addr) & 0xFFFF_FFFF)
+    return addr.is_global
+
+
+async def fetch_public(url: str) -> httpx.Response:
+    target = httpx.URL(url)
+    if target.scheme not in {"http", "https"} or not target.host:
+        raise ValueError(url)
+    port = target.port or (443 if target.scheme == "https" else 80)
+    infos = await anyio.getaddrinfo(target.host, port, type=socket.SOCK_STREAM)
+    addrs = [ipaddress.ip_address(info[4][0]) for info in infos]
+    if not addrs or not all(is_public(addr) for addr in addrs):
+        raise ValueError(url)
+    pinned = target.copy_with(host=str(addrs[0]))  # connect to what was checked
+    # A client per call: a pooled connection to this IP never serves another hostname.
+    async with httpx.AsyncClient(follow_redirects=False) as client:
+        return await client.get(
+            pinned,
+            headers={"Host": target.netloc.decode("ascii")},
+            extensions={"sni_hostname": target.host},
+        )
+```
 
 ## Gotchas
 
@@ -223,6 +434,18 @@ app.add_middleware(
 - Agent relies on CORS to protect cookie-authenticated writes - simple cross-site `POST`s still execute.
 - Agent compares API keys with `==` - timing side channel.
 - Agent uses a short JWT secret - a weak key, and a warning that fails tests under `filterwarnings = error`.
+- Agent starts uvicorn with `--forwarded-allow-ips '*'` behind a load balancer - every client chooses its own `request.client.host`.
+- Agent takes the client from `X-Forwarded-For` at `chain[-(hops + 1)]` - the client-sent value; a fresh rate-limit bucket per request.
+- Agent lists the load balancer but not the CDN in front of it in `--forwarded-allow-ips` - every client gets the CDN's address.
+- Agent verifies a webhook signature over the re-serialized body model - it never matches; sign-check `await request.body()`.
+- Agent commits the webhook event id before applying the effect - a failed effect is never retried; the redelivery answers duplicate.
+- Agent commits webhook writes after a dependency's `yield` - the `200` is sent first; a failed commit is lost.
+- Agent passes two `str` to `hmac.compare_digest` - a non-ASCII header value is a `500`.
+- Agent blocks user-supplied URLs with `is_private`, `not is_global` or an IPv4 deny list - each lets CGNAT, IPv4-mapped or NAT64 addresses through.
+- Agent validates a URL's host and then lets httpx resolve it again - a rebinding resolver reaches internal hosts.
+- Agent pins the IP for HTTPS fetches on a shared client - a second hostname on that IP rides the first name's TLS connection unchecked (with `http2=True` even without keep-alive); use a client per call.
+- Agent fetches user-supplied URLs with a client that follows redirects - a redirect leads to an internal address unchecked.
+- Agent reads a webhook body without a size limit before verifying it - unsigned bodies of any size are buffered; a `Content-Length` check alone misses chunked requests.
 
 ## Official sources
 

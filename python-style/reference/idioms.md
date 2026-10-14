@@ -79,6 +79,11 @@ def pairs(names: list[str], ages: list[int]) -> dict[str, int]:
 - `functools.cache` on a method keeps every instance alive for the life of the process (the
   cache holds `self`). ruff `B019`. On an `async def` it caches the coroutine object, and the
   second call fails with `RuntimeError: cannot reuse already awaited coroutine`.
+- `functools.cached_property` has no lock (Python 3.12+). Threads that read the attribute for the
+  first time at once each run the method and get their own result: eight threads on a slow load
+  ran it eight times and got eight objects. When first access can be concurrent, use a plain
+  property that checks `is None`, takes a `threading.Lock`, and checks again inside it. `del
+  obj.attr` to reset it raises `AttributeError` when it was never computed. **Nothing** reports it.
 
 ## Iteration
 
@@ -96,7 +101,9 @@ def pairs(names: list[str], ages: list[int]) -> dict[str, int]:
 
 - **`value or default` replaces every falsy value, not only `None`.** `limit or 10` turns a
   legitimate `0` into `10`; `name or "anonymous"` replaces `""`. Write
-  `default if value is None else value`. **Nothing** reports it.
+  `default if value is None else value`. **Nothing** reports it. `items = items or []` (or
+  `if not items: items = []`) also replaces a caller's empty list: a function meant to fill the
+  list it was given fills a new one, and the caller's stays empty.
 - `if x:` on an `int | None` treats `0` like `None`. Compare with `is None` when `0`, `""` or an
   empty container is a valid value.
 - `bool("False")` is `True`: every non-empty string is truthy. Parse flags from the environment
@@ -209,6 +216,11 @@ def parse_port(raw: str) -> int:
   missing executable does raise `FileNotFoundError`). Pass `check=True` (ruff `PLW1510`), give
   the arguments as a list, and do not use `shell=True` with anything that contains outside
   input (ruff `S602`, if the project enables the `S` rules).
+- A list of arguments prevents shell injection, not option injection: an outside value that starts
+  with `-` is read as an option (given `--output=x.txt` as a path, `git diff --no-index` writes
+  `x.txt`). Put `--` before positional arguments when the command supports it, or reject values
+  that start with `-`. **Nothing** reports it; ruff `S603` flags every call alike, with or without
+  `--`.
 - Open files, locks, sockets and temporary directories with `with`. ruff `SIM115` reports an
   `open()` outside one.
 - In a `@contextmanager` (or `@asynccontextmanager`) generator, code after a `yield` that is not
@@ -274,6 +286,8 @@ def transaction(conn: Connection) -> Generator[Connection]:
 - Agent rolls back in `except Exception:` and re-raises - Ctrl+C, `sys.exit()` or a cancelled task skips the rollback.
 - Agent puts cleanup after a `yield` that is not inside `try`/`finally` in a `@contextmanager` - it is skipped whenever the `with` block raises.
 - Agent submits work to an executor and never reads the futures - every exception in the workers is lost.
+- Agent passes outside input to a list-form `subprocess.run` without `--` - a value starting with `-` becomes an option.
+- Agent loads an expensive resource in a `functools.cached_property` read from several threads - each thread that races on the first access loads its own copy.
 
 ## Official sources
 

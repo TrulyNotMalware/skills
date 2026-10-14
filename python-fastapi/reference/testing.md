@@ -2,7 +2,9 @@
 
 Applies to pytest 9.1, pytest-asyncio 1.4, httpx 0.28, FastAPI 0.142, SQLAlchemy 2.1. Follow the
 project's existing test style first (sync `TestClient` or async `AsyncClient`, fixture layout,
-markers). The rules below are about what each choice silently changes.
+markers). The rules below are about what each choice silently changes. Framework-free pitfalls
+(captured output, mocks and patch targets, which copy of the package is imported) are in
+the testing reference of the python-style skill.
 
 Contents: [pytest-asyncio configuration](#pytest-asyncio-configuration) ·
 [httpx and httpx2](#httpx-and-httpx2) · [Choosing a client](#choosing-a-client) ·

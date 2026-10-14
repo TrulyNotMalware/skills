@@ -7,11 +7,11 @@ description: >
   validators and settings, SQLAlchemy AsyncSession, transactions, MissingGreenlet, pagination,
   Alembic migrations, asyncio tasks, cancellation and timeouts, exception handlers, streaming,
   generator endpoints and JSON Lines, SSE, WebSockets, background jobs, httpx and retries, JWT auth,
-  CORS, logging, metrics, tracing, health checks, Kafka (aiokafka), Redis and arq, tests
-  (pytest-asyncio, TestClient, AsyncClient, DB fixtures), pyproject, uv, ruff, mypy, uvicorn and
-  fastapi run. Also use when FastAPI "silently does the wrong thing" (a write that is not committed,
-  a handler that blocks every request, a test that passes while the real server fails). Not for
-  Django, Flask, or data-science notebooks.
+  CORS, webhooks, SSRF, logging, metrics, tracing, health checks, Kafka (aiokafka), Redis and arq,
+  tests (pytest-asyncio, TestClient, AsyncClient, DB fixtures), pyproject, uv, ruff, mypy, uvicorn
+  and fastapi run. Also use when FastAPI "silently does the wrong thing" (a write that is not
+  committed, a handler that blocks every request, a test that passes while the real server fails).
+  Not for Django, Flask, or data-science notebooks.
 ---
 
 # Python + FastAPI
@@ -25,9 +25,9 @@ cases. Read the matching reference file before editing that area.
 
 ## Target versions
 
-Verified 2026-09-30 by running code on these versions, extended 2026-10-13. Version-bound
-statements in this skill and its references are tagged `(FastAPI 0.142)` or similar; when the
-project upgrades, re-check those first.
+Verified 2026-09-30 by running code on these versions, extended 2026-10-13 and 2026-10-14.
+Version-bound statements in this skill and its references are tagged `(FastAPI 0.142)` or similar;
+when the project upgrades, re-check those first.
 
 | Component | Baseline | Notes |
 |---|---|---|
@@ -106,16 +106,16 @@ just to make a symptom disappear.
 |---|---|
 | App factory, `lifespan`, `Depends` and `yield` dependencies, route order and trailing slashes, router prefixes, `app.frontend()`, response filtering and returned instances, `ORJSONResponse`, `def` vs `async def`, threadpool size, calling async code from `def`, middleware, context variables, annotations | [reference/fastapi-basics.md](reference/fastapi-basics.md) |
 | Pydantic v2 models, validators, coercion and strict mode, SQLModel table models, PATCH with `exclude_unset`, aliases, serialization, NaN, shared serializers, request body shapes, `BaseSettings`, environment variables, `NoDecode`, URL settings | [reference/pydantic-models.md](reference/pydantic-models.md) |
-| Async engine and session, commit and rollback, savepoints, connection pool, concurrent queries, relationship loading, pagination, `MissingGreenlet`, server defaults and `onupdate`, `Enum`/`JSONB`/datetime columns, Alembic migrations and autogenerate | [reference/sqlalchemy-async.md](reference/sqlalchemy-async.md) |
+| Async engine and session, commit and rollback, savepoints, connection pool, batch jobs and per-item savepoints, concurrent queries, relationship loading, pagination, `MissingGreenlet`, server defaults and `onupdate`, `Enum`/`JSONB`/datetime columns, Alembic migrations and autogenerate | [reference/sqlalchemy-async.md](reference/sqlalchemy-async.md) |
 | Background tasks and task ownership, cancellation, timeouts, `gather` vs `TaskGroup`, bounding fan-out, `to_thread`, executors and context variables, client disconnects, shutdown, Python 3.14 loop API | [reference/asyncio-concurrency.md](reference/asyncio-concurrency.md) |
 | Exception handlers and matching, error body shape, `422` input echo, status codes without bodies, error headers | [reference/web-errors.md](reference/web-errors.md) |
 | `StreamingResponse`, generator endpoints and JSON Lines, Server-Sent Events, WebSockets and disconnect cleanup, `BackgroundTasks`, long-running jobs (`202` + status endpoint, enqueue after commit) | [reference/streaming-background.md](reference/streaming-background.md) |
 | Calling other services with `httpx`: client lifecycle, cookie jar, timeouts (per read, pool), exception hierarchy, retries and tenacity, redirects, streaming pass-through | [reference/http-clients.md](reference/http-clients.md) |
-| Bearer tokens and JWT verification, FastAPI security schemes, scopes and authorization, password hashing (bcrypt 5, passlib), CORS and CSRF, proxy headers | [reference/security.md](reference/security.md) |
-| Logging configuration and uvicorn loggers, structlog context, Prometheus labels, where to measure, multi-worker registries, OpenTelemetry (native and contrib, 0.143 auto-setup), health and readiness endpoints | [reference/config-observability.md](reference/config-observability.md) |
+| Bearer tokens and JWT verification, FastAPI security schemes, scopes and authorization, password hashing (bcrypt 5, passlib), CORS and CSRF, proxy headers and client IP, webhook signatures and dedupe, SSRF and user-supplied URLs | [reference/security.md](reference/security.md) |
+| Logging configuration and uvicorn loggers, structlog context, Prometheus labels, where to measure, multi-worker registries, OpenTelemetry (native and contrib, 0.143 auto-setup), health and readiness endpoints and their status codes and timeouts | [reference/config-observability.md](reference/config-observability.md) |
 | Kafka with `aiokafka`: producer lifecycle and `send` futures, idempotence, consumer groups and offsets, commits and redelivery, heartbeats and blocking, poison messages, transactional outbox | [reference/kafka-aiokafka.md](reference/kafka-aiokafka.md) |
-| Redis with `redis.asyncio`: client defaults, timeouts and retries, bytes vs str, TTL pitfalls, locks, pipelines, rate limits; job queues (`arq`) | [reference/redis-cache-queues.md](reference/redis-cache-queues.md) |
-| pytest-asyncio modes and loop scopes, `TestClient` vs `AsyncClient`, lifespan in tests, `dependency_overrides`, database fixtures with rollback, what to assert | [reference/testing.md](reference/testing.md) |
+| Redis with `redis.asyncio`: client defaults, timeouts and retries, bytes vs str, TTL pitfalls, locks, pipelines, rate limits and failing closed; job queues (`arq`) | [reference/redis-cache-queues.md](reference/redis-cache-queues.md) |
+| pytest-asyncio modes and loop scopes, `TestClient` vs `AsyncClient`, lifespan in tests, `dependency_overrides`, database fixtures with rollback, what to assert; framework-free pytest and mock pitfalls are in python-style | [reference/testing.md](reference/testing.md) |
 | `pyproject.toml`, extras and dependency groups, lock files and uv (`--locked`, `--frozen`, `uv run`), ruff (`ASYNC`, `FAST`, `RUF006`), mypy with the pydantic plugin, uvicorn workers and proxy flags, `fastapi run`, container basics | [reference/packaging-tooling.md](reference/packaging-tooling.md) |
 
 ## Gotchas
@@ -159,6 +159,17 @@ own, longer list.
   See [http-clients](reference/http-clients.md#retries).
 - Agent sets `timeout=10` on an httpx call to bound it - the timeout is per read; a dripping
   response runs as long as it likes.
+- Agent derives the client IP with `--forwarded-allow-ips '*'` or the wrong hop of
+  `X-Forwarded-For` - each client picks its own address and its own rate-limit bucket.
+- Agent verifies a webhook signature over the parsed model, or records the event id in its own
+  commit before the effect - signatures never match, or a failed event is never retried.
+- Agent checks a user-supplied URL's host and then lets httpx resolve it again, or sends the pinned
+  request on a shared client - DNS rebinding reaches internal addresses, or another hostname rides
+  the first one's TLS connection unchecked.
+  See [security](reference/security.md#server-side-request-forgery).
+- Agent lets a database or Redis error escape a readiness check or an auth rate limiter - `500`
+  after a minute, or no answer at all from a stalled database, instead of a fast `503`; or unlimited
+  logins when it fails open.
 - Agent combines `allow_origins=["*"]` with `allow_credentials=True` - any origin gets credentialed
   access; nothing rejects it.
 - Agent points Alembic's `target_metadata` at `Base.metadata` without importing the model modules -

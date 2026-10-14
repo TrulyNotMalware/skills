@@ -127,6 +127,17 @@ async def add_tag_if_new(session: AsyncSession, name: str) -> bool:
     return True
 ```
 
+- A batch job (worker, cron, consumer) that loops over items on one session with a `try` per item
+  isolates nothing: after the first `IntegrityError`, every later item, a read of `item.id` in the
+  `except` block, the "mark failed" flush and the final `commit()` all raised `PendingRollbackError`,
+  and none of the batch was stored, the items that succeeded included (aiosqlite; PostgreSQL not
+  run). Wrap each item in `begin_nested()` like the function above, or give each item its own
+  session and commit. Read ids before the savepoint: one that rolls back after changing the item
+  leaves it expired, reading it raises `MissingGreenlet` (in a `StatementError`), so
+  `await session.refresh(item)` before marking it failed. That works only for objects that were
+  persistent before the savepoint; one added inside it is gone from the session, and `refresh`
+  raises `InvalidRequestError: ... is not persistent within this Session`. Keep its input values
+  in locals.
 - The session holds its connection from the first statement until commit, rollback, or close. A
   handler that reads and then awaits a slow outbound call keeps the connection checked out for the
   whole call. Observed with `pool_size=1`, `max_overflow=0`, `pool_timeout=1`, three concurrent
@@ -411,6 +422,7 @@ class Base(DeclarativeBase):
 - Agent adds `ON DELETE CASCADE` to the foreign key and leaves the relationship at the default cascade - `session.delete(parent)` nulls the children's foreign keys first and they survive as orphans (loaded ones even with `passive_deletes=True`); use `cascade="all, delete-orphan", passive_deletes=True`.
 - Agent sets `pool_timeout` to bound slow queries - it only bounds waiting for a connection.
 - Agent continues with a session after `IntegrityError` without rollback - `PendingRollbackError` or "current transaction is aborted"; use `begin_nested()`.
+- Agent processes a batch on one session with a `try` per item - the first database error aborts the whole batch, its failure marker included.
 - Agent reads an unloaded many-to-one that works in one code path - the target was in the identity map; another path raises `MissingGreenlet`.
 - Agent passes the request's session to a background task - it works and, once the task uses it, holds a connection until the task ends.
 - Agent mutates a JSON column in place, or a nested value under `MutableDict` - the change is silently not saved.
