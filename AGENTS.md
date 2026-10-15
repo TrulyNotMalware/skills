@@ -64,6 +64,8 @@ skills/
 - **부정 판정("없다", "안 된다")은 환경을 함께 확인**한다. Boot 4 는 자동 구성이 모듈로 쪼개져 있어 "메타데이터에 속성이 없음"이 "그 모듈을 안 넣었음"일 수 있다.
 - 검증에 DB·Kafka·Redis 가 필요하면 `~/infra` 를 **묻지 않고 기동**해 쓴다(2026-09-30 결정, 절차는 `local-infra` 스킬). 공용 인스턴스에는 검증 전용 DB·토픽 접두어를 만들어 쓰고 끝나면 지운 뒤, 스택을 내릴지 묻는다. `redis-cluster` 는 기동 시 호스트 포트 고갈 이슈가 있다(`~/infra/docs/issue-redis-cluster-bus-port-loop.md`) — 해결 전에는 임시 단일 컨테이너를 쓴다. Testcontainers 류는 컴파일 확인까지만 해도 된다.
 - **scratch 는 재부팅에 사라진다**(`/private/tmp`). 검증 결과는 곧바로 스킬 본문·위키에 반영해 두고, 에이전트 보고는 "문제만, 짧게, 중요한 것 먼저"로 요청한다(긴 보고는 잘리고, 세션이 끊기면 나머지를 받을 수 없다).
+- **컨테이너 안의 동작(셸 exec·시그널·PID 1·경로)은 대상 이미지 안에서 잰다 (2026-10-15).** macOS `/bin/dash` 는 마지막 명령을 exec 하고 `python:*-slim` 의 Debian dash 는 단일 명령도 exec 하지 않는다 — 호스트 셸로 잰 "dash 는 exec 한다" 가 스킬에 들어가 shell-form `CMD` 문장이 틀려 있었다(python-fastapi 10차).
+- **사용량 한도를 같이 쓰는 검증 레인과 헤드리스 세션은 나눠 띄우고, 오래 도는 측정은 `caffeinate -i -s` 로 감싼다 (2026-10-15).** 2026-10-14 에 레인 4개와 헤드리스 세션 3개를 한꺼번에 띄우자 전부 같은 시각에 한도로 끊겼고(헤드리스 결과는 판정 불가), 노트북 잠자기가 다음 날 레인 하나를 76분 멈췄다. 레인이 결과를 파일로 바로 남겨 둔 것만 회수됐다 — 레인 브리프에 「결과는 진행하면서 파일에」 를 넣는다.
 - 버전·API 사실은 기억이 아니라 조회로: `~/.claude/skills/dependency-bump/scripts/latest-versions.sh`(Maven·Gradle 전용), 캐시된 jar(`~/.gradle/caches/modules-2/files-2.1`)의 `javap`, `META-INF/spring-configuration-metadata.json`. PyPI 는 `https://pypi.org/pypi/<pkg>/json`, 설치된 패키지의 소스와 `importlib.metadata`.
 
 ### Python 스킬을 검증할 때
