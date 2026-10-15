@@ -134,9 +134,9 @@ key: wrong `aud`, wrong `iss`, and a missing `aud` are all rejected (401).
 - **Several issuers (multi-tenant):** never build a decoder from whatever `iss` the token claims. Keep
   an allowlist of issuers (`JwtIssuerAuthenticationManagerResolver` with explicit issuers), validate
   audience per issuer, and identify users by `(iss, sub)`, not `sub` alone. `fromTrustedIssuers(...)`
-  builds each decoder through OIDC discovery (`JwtDecoders.fromIssuerLocation`, Security 7.1, from
-  source); for issuers that publish only a JWK set, pass your own issuer-to-manager lookup to the
-  constructor (the reactive form is in [webflux-gateway](webflux-gateway.md#reactive-security-defaults-and-jwt)).
+  builds each decoder from issuer metadata, OIDC discovery or RFC 8414
+  (`JwtDecoders.fromIssuerLocation`, Security 7.1, from source); for issuers that publish only a JWK
+  set, pass your own issuer-to-manager lookup to the constructor (the reactive form is in [webflux-gateway](webflux-gateway.md#reactive-security-defaults-and-jwt)).
 - **Authorities mapping:** by default the `scope`/`scp` claim becomes `SCOPE_<value>` authorities.
   Roles in other claims (Keycloak `realm_access.roles`, Auth0 custom namespaces, Entra `roles`) are
   **ignored** until you map them with a `JwtAuthenticationConverter`. `hasRole("ADMIN")` checks for

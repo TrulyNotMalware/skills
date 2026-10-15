@@ -150,12 +150,14 @@ kotlin {
 
 ## Build behavior and verification
 
-- **Non-UTF-8 locale and non-ASCII test names (Gradle 9.7.0):** `:test` fails with "Could not
-  generate test report ... Malformed input or input contains unmappable characters" when the daemon
-  runs under a non-UTF-8 locale (`LC_CTYPE=POSIX`, common in containers; `sun.jnu.encoding` is then
-  `ANSI_X3.4-1968`) and a test name contains a non-ASCII character (an em dash was enough). No result
-  XML is written either, so the run proves nothing. Rerun with `LC_ALL=C.UTF-8`: Gradle starts a
-  fresh daemon when the locale differs (the file-name encoding is fixed at daemon start).
+- **Non-UTF-8 locale and non-ASCII test names (Gradle 9.7.0, Linux containers):** `:test` fails with
+  "Could not generate test report ... Malformed input or input contains unmappable characters" when
+  the daemon runs under a non-UTF-8 locale (`LC_CTYPE=POSIX`, common in containers; `sun.jnu.encoding`
+  is then `ANSI_X3.4-1968`) and a test name contains a non-ASCII character (an em dash was enough). No
+  result XML is written either, so the run proves nothing. Rerun with `LC_ALL=C.UTF-8`; in the Linux
+  container where this was seen, Gradle started a fresh daemon for the new locale. On macOS (Temurin
+  25) the failure does not occur, since `sun.jnu.encoding` stays `UTF-8` under `POSIX`, and the same
+  daemon was reused for every locale. If a rerun still fails, `./gradlew --stop` first.
 
 - Run verification builds with warnings visible:
   `./gradlew build --warning-mode all --console=plain`. Without `--warning-mode all`, Gradle prints
@@ -167,8 +169,8 @@ kotlin {
   while the default output listed every `w:` line. Read Kotlin warnings from a run without the flag
   that actually compiles: an UP-TO-DATE `compileKotlin` prints none, so add `--rerun-tasks` (or run
   after `clean`).
-- Deprecated Kotlin DSL forms to avoid in new code (Gradle 9.x warns): `val x: String by extra`,
-  `val x by extra("1.2.3")` (deprecated since Gradle 9.6; measured on 9.7.0) and
+- Deprecated Kotlin DSL forms to avoid in new code (Gradle 9.7.0 warns about all three, "scheduled to
+  be removed in Gradle 10"; 9.5.1 is silent): `val x: String by extra`, `val x by extra("1.2.3")` and
   `val t by tasks.getting`. Use `extra["x"] as String` and `tasks.named<T>("x") { }`. If Dependabot
   updates versions in the build script, declare them in a form its parser reads (a version catalog,
   `extra["x"] = "1.2.3"`, or `extra.set("x", "1.2.3")`) and keep the reads separate; test a new form

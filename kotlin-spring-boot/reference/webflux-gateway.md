@@ -35,7 +35,9 @@ A request passes through three stages:
 - **A `GlobalFilter` gets its order from `Ordered` or from `@Order` on its class.** `@Order` on the
   `@Bean` method that returns a lambda filter is ignored by the gateway's sort (it only reorders the
   injected list): the filter runs at `LOWEST_PRECEDENCE`, after `RouteToRequestUrlFilter` and just
-  before the routing filter. A "strip, then stamp" pair written that way silently swaps.
+  before the routing filter. A "strip, then stamp" pair silently swaps when only the strip filter is
+  such a lambda and the stamp filter has a real order. Two lambda `@Bean`s keep the order of their
+  `@Order` values relative to each other, but both move after `RouteToRequestUrlFilter`.
 - The authenticated principal reaches `GlobalFilter`s through the Reactor context
   (`ReactiveSecurityContextHolder.getContext()`), not a `ThreadLocal`.
 - Responses written in stage 1 (a 401 from Security, a rejection by your own `WebFilter`) skip
@@ -67,24 +69,32 @@ ReactiveSecurityContextHolder.getContext()
   the backend still sees one call, while every remaining filter up to the routing filter (rate limits,
   logging, metrics) runs twice.
 - If a filter fails during the duplicate pass, after the response is committed, the server closes
-  the connection once the response is written. The request itself still gets its status; the *next*
-  request on that keep-alive connection can fail with "Connection prematurely closed BEFORE response"
-  or "Connection reset by peer" (5 and 7 of 30 back-to-back requests, depending on where the failing
-  filter sits).
+  the connection once the response is written (every time, without a `Connection: close` header). The
+  request itself still gets its status; the *next* request on that keep-alive connection can fail with
+  "Connection prematurely closed BEFORE response" or a connection reset. How often depends on the
+  client and the timing, not on where the failing filter sits: 13–15 of 30 back-to-back requests with
+  Reactor Netty or `WebTestClient`, 0–1 of 30 after a 1 ms pause and none after 2 ms or more. The JDK
+  `HttpClient` showed no failures for GET only because it retries an idempotent request once on a
+  closed pooled connection; a POST failed as often (14–15 of 30).
 - The same applies to `.then(chain.filter(...))` after another `chain.filter`, and to any
   `Mono<Void>` followed by `switchIfEmpty`/`defaultIfEmpty` that expects a value.
 - **Add response headers in `exchange.response.beforeCommit { }`**, registered before
-  `chain.filter`. Code in `chain.filter(exchange).then { ... }` runs after the body was written when
-  the filter is ordered before `NettyWriteResponseFilter` (`-1`): the headers are read-only by then,
-  `add` throws `UnsupportedOperationException`, the client still gets the response without the header,
-  and the server closes the keep-alive connection. At order `0` and later the same code still works,
-  which is why it breaks only after a reorder. Stub chains never commit, so unit specs pass either way.
+  `chain.filter`. Code chained after the chain (`chain.filter(exchange).then(Mono.fromRunnable { ... })`)
+  runs after the body was written when the filter is ordered before `NettyWriteResponseFilter` (`-1`):
+  the headers are read-only by then, `add` throws `UnsupportedOperationException`, the client still
+  gets the response without the header, and the server closes the keep-alive connection. At order `0`
+  and later the same code still works, which is why it breaks only after a reorder. A stub chain that
+  returns `Mono.empty()` never commits, so unit specs built on it pass either way; a stub that calls
+  `exchange.response.setComplete()` reproduces the exception.
 
 ## Coroutine filters: keep the downstream call outside timeouts and catches
 
 Filters written as `mono { ... }.then()` usually suspend on `chain.filter(exchange).awaitSingleOrNull()`.
-That await lasts until the backend's response has been written to the client, so anything wrapped
-around it bounds the whole proxied request:
+In a filter ordered before `NettyWriteResponseFilter` (`-1`), that await lasts until the backend's
+response has been written to the client, so anything wrapped around it bounds the whole proxied
+request. Ordered after it, the await ends when the backend's response headers arrive: a timeout
+there still cuts a backend that is slow to answer, but not one that answers at once and streams a
+slow body (order `5`, `withTimeout(1000)`, body after 1.5 s: 200 with the full body).
 
 | Wrapped around `chain.filter` | Effect (measured through a real gateway, backend answering after 1.5 s) |
 |---|---|
@@ -123,13 +133,16 @@ override fun filter(exchange: ServerWebExchange, chain: GatewayFilterChain): Mon
   A blanket `throw e` overshoots the other way: a `CancellationException` raised as an error while the
   request is live (an awaited future that was cancelled) then turns into a 500 instead of following
   the failure stance.
-- Await everything inside `mono { }`. If `reject` returned a `Mono` instead of suspending, the `if`
-  would widen to `Any?`, `mono { }` would emit that `Mono` as its value and `.then()` would drop it:
-  the status is set, the body is never written, and nothing warns.
-- A bare `mono { }` starts on `Dispatchers.Default`, so each request hops off the Netty event loop and
-  the rest of the chain is subscribed from that pool. `mono(Dispatchers.Unconfined) { }` stays on the
-  calling thread (Spring runs suspend handler methods the same way); use it only when the body never
-  blocks ([coroutines](coroutines.md#dispatchers-and-blocking-code)).
+- Await everything inside `mono { }`. If `reject` returned a `Mono` instead of suspending,
+  `mono { }` would emit that `Mono` as its value and `.then()` would drop it: the status is set, the
+  body is never written, and neither the compiler nor the log warns.
+- A bare `mono { }` starts on `Dispatchers.Default`, so the body and the rest of the chain run on that
+  pool. (With Spring Security in front and its default session-backed request cache, gateway filters
+  already run on Reactor's `parallel` threads rather than the Netty event loop: the switch happens
+  inside the security chain and disappears with a no-op request cache.)
+  `mono(Dispatchers.Unconfined) { }` stays on the calling thread (Spring runs suspend handler methods
+  the same way); use it only when the body never blocks
+  ([coroutines](coroutines.md#dispatchers-and-blocking-code)).
 - `runCatching { suspendCall() }` inside the checks has the same problem: it turns the deadline's
   cancellation into a `Result.failure` and runs the failure branch (logging, fallback counters) after
   the deadline already decided. On a `CancellationException` failure, call
@@ -146,7 +159,7 @@ Gateway Server WebFlux 5.0, measured over real sockets:
 | Property prefix | Only `spring.cloud.gateway.server.webflux.*` is bound. Routes, `globalcors` or `httpclient` under the old `spring.cloud.gateway.*` are ignored without a warning: no routes, every request 404 |
 | `CircuitBreaker` route filter (Resilience4j) | Adds a **1 s** time limiter: a slower backend gets **504** at about 1 s and the backend call is cancelled. Raise it per breaker: `resilience4j.timelimiter.instances.<name>.timeout-duration` |
 | `httpclient.response-timeout` | Unset: no gateway-level timeout at all (a 10 s backend still answered 200). Set it, globally or per route (`response-timeout` metadata) |
-| `trusted-proxies` | Unset: the backend receives **no** `X-Forwarded-*`/`Forwarded` headers, and client-sent ones are stripped. Set to a regex matching the immediate peer: the gateway adds them **and keeps whatever the client sent**, appending to it (`X-Forwarded-For: <client value>,<peer>`). Use a narrow regex, and do not let backends trust the leftmost entry |
+| `trusted-proxies` | Unset: the backend receives **no** `X-Forwarded-*`/`Forwarded` headers, and client-sent ones are stripped. Set to a regex matching the immediate peer: the gateway adds them. Client-sent `X-Forwarded-Host`/`-Proto`/`-Port`/`-Prefix` are **kept and appended to**. A client-sent `X-Forwarded-For` header survives only when its whole value matches the regex (one header `10.1.2.3, 10.4.5.6` is dropped even when both addresses match), and a `Forwarded` element only when its `for` matches, its `host` and `proto` kept as sent; an element without `for` is always dropped. A real client IP added by an upstream proxy outside the regex is lost, while forged values inside it survive. `.*` keeps every `X-Forwarded-For` (`<client value>,<peer>`) and every `Forwarded` element that has a `for`. Use a narrow regex, and do not let backends trust the leftmost entry |
 
 The starter is `spring-cloud-starter-gateway-server-webflux`; the client IP for per-IP limits comes
 from a `RemoteAddressResolver` such as `XForwardedRemoteAddressResolver.maxTrustedIndex(n)`, which
@@ -191,8 +204,9 @@ slashes are allowed. Keep the raw path for audit logs.
 The gateway applies `spring.cloud.gateway.server.webflux.globalcors` in `RoutePredicateHandlerMapping`
 (stage 2). A response written by Spring Security in stage 1 carries no CORS headers, so a browser
 client cannot read a 401 and reports a CORS error instead (an expired token looks like a network
-failure). Preflights are not affected as long as Security lets `OPTIONS` through: they reach stage 2
-and get the gateway's CORS answer.
+failure). Preflights are affected too unless Security lets `OPTIONS` through: with `anyExchange`
+`authenticated` and no `cors { }`, a preflight gets 401 without CORS headers. When `OPTIONS` is
+permitted, preflights reach stage 2 and get the gateway's CORS answer.
 
 Apply the same configuration in the security chain, which runs its CORS filter before
 authentication:
@@ -215,9 +229,12 @@ fun securityWebFilterChain(http: ServerHttpSecurity, globalCors: GlobalCorsPrope
   `org.springframework.web.cors.reactive.CorsConfigurationSource`, not the servlet `web.cors` one.
 - Routed responses still carry one `Access-Control-Allow-Origin`: `DefaultCorsProcessor` skips a
   response that already has one.
-- A disallowed origin is now rejected with 403 by the security chain before authentication.
-- Only the global configurations are copied, at startup. Per-route `cors` metadata, or a refresh that
-  changes `globalcors`, is not reflected in the security chain.
+- Preflights are now answered by the security chain (200 with CORS headers), so `OPTIONS` need not be
+  permitted. A disallowed origin is rejected with 403 before authentication.
+- Only the global configurations are copied, at startup. Per-route `cors` metadata is not: where a
+  global pattern such as `/**` also covers the route, the security chain rejects an origin that only
+  the route allows with 403 (other pattern layouts not run). A refresh that changes `globalcors` is not
+  reflected either (follows from the copy at startup; not run).
 
 ## Reactive security defaults and JWT
 
@@ -232,19 +249,41 @@ Measured on Spring Security 7.1.0 with `oauth2ResourceServer { jwt { } }`:
   **401** `invalid_token`. Only a request without a bearer token passes. Clients must not attach a
   stale token to login or refresh calls (or give those paths a chain without `oauth2ResourceServer`).
 - **A decoder you build yourself checks neither `iss` nor `aud`.** Besides the signature, its default
-  validator (`JwtValidators.createDefault()`, Security 7.1.0, from source) checks only `exp`/`nbf`
-  (60 s clock skew), a `typ` header of `JWT` or none, and the client-certificate thumbprint of a token
-  bound with `cnf.x5t#S256`.
+  validator (`JwtValidators.createDefault()`, Security 7.1.0) checks only `exp`/`nbf` (60 s clock
+  skew; a token without `exp` never expires), a `typ` header of `JWT` or none, and the
+  client-certificate thumbprint of a token bound with `cnf.x5t#S256` (401 when the request has no
+  client certificate).
   `NimbusReactiveJwtDecoder.withJwkSetUri(...).build()` accepted a wrong and a missing `aud` (200),
   and `spring.security.oauth2.resourceserver.jwt.audiences`/`issuer-uri` configure only Boot's own
   decoder bean, never yours. Set the validators on each decoder:
   `decoder.setJwtValidator(DelegatingOAuth2TokenValidator(JwtValidators.createDefaultWithIssuer(issuer), JwtClaimValidator<List<String>>(JwtClaimNames.AUD) { aud -> expectedAudience in aud }))`
   (wrong or missing `aud` then 401 "The aud claim is not valid"). The audience advice in
   [security](security.md#jwt-resource-server) applies the same way.
+- **RFC 9068 access tokens (`typ: at+jwt`) get 401 from every default decoder**, Boot's own included
+  ("the given typ value needs to be one of [JWT]"). `createDefaultWithValidators` adds the default
+  `typ` check only when the list has no `JwtTypeValidator`, so pass one that accepts the RFC 9068
+  forms as well:
+
+  ```kotlin
+  decoder.setJwtValidator(
+      JwtValidators.createDefaultWithValidators(
+          JwtTypeValidator("JWT", "at+jwt", "application/at+jwt").apply { setAllowEmpty(true) },
+          JwtIssuerValidator(issuer),
+          JwtClaimValidator<List<String>>(JwtClaimNames.AUD) { aud -> expectedAudience in aud },
+      ),
+  )
+  ```
+
+  For an issuer that sends only RFC 9068 tokens, `JwtValidators.createAtJwtValidator()` builds the
+  whole profile instead: `typ` must be `at+jwt` or `application/at+jwt` (plain `JWT` and a missing
+  `typ` get 401), and the profile's claims such as `exp`, `jti` and `client_id` must be present.
+  `.issuer(...)` and `.audience(...)` are required (`build()` throws without them); `.clientId(...)`
+  is optional, and without it `client_id` only has to be present.
 
 - **Several issuers:** `JwtIssuerReactiveAuthenticationManagerResolver.fromTrustedIssuers(...)` builds
-  each decoder with `ReactiveJwtDecoders.fromIssuerLocation`, which requires OIDC discovery at
-  `{issuer}/.well-known/openid-configuration`. A JWK-set-only issuer then fails with 500 (an
+  each decoder with `ReactiveJwtDecoders.fromIssuerLocation`, which requires issuer metadata: OIDC
+  discovery or RFC 8414 authorization-server metadata (it tries `{issuer}/.well-known/openid-configuration`
+  and two host-relative well-known paths). A JWK-set-only issuer then fails with 500 (an
   `IllegalArgumentException`, not 401), and every token retries discovery because the failure is not
   cached. For backends that publish only a JWK set, use the
   constructor with your own lookup (an allowlist map from `iss` to a
@@ -252,9 +291,13 @@ Measured on Spring Security 7.1.0 with `oauth2ResourceServer { jwt { } }`:
   An unknown issuer then yields an empty `Mono` and a 401. Each manager's decoder needs its own
   validators (above).
 - **JWK fetch timeouts:** without `.webClient(...)` the decoder uses `WebClient.create()`, which has no
-  response timeout (a JWK endpoint that never answered was still pending after 15 s). Pass a
-  `WebClient` built from the injected `WebClient.Builder` with a `ReactorClientHttpConnector` whose
-  `HttpClient` sets a connect timeout and a `responseTimeout` ([http-clients](http-clients.md)).
+  response timeout (a JWK endpoint that never answered was still pending when the probe stopped at
+  60 s). Pass a `WebClient` built from the injected `WebClient.Builder` with a
+  `ReactorClientHttpConnector` whose `HttpClient` sets a connect timeout and a `responseTimeout`
+  ([http-clients](http-clients.md)). Boot 4 defines that builder bean in `spring-boot-webclient`
+  (`spring-boot-starter-webclient`); the gateway starter alone does not bring it, so require it or
+  build one with `WebClient.builder()`. A fetch that times out fails the request with 500 ("Could not
+  obtain the keys"), on a `permitAll` route too when the request carries a bearer token.
 - **Unknown `kid` refetches every time** (Spring Security 7.1.0: 5 tokens with random `kid`s made 5
   JWK-set requests; `ReactiveRemoteJWKSource.get` re-downloads the set whenever the cached one has no
   matching key, with no cooldown). Tokens carrying a valid `iss` and random `kid`s make one JWK-set request each,
@@ -350,18 +393,19 @@ class GatewayChainSpec : BehaviorSpec() {
 - Agent orders a `GlobalFilter` at `-200` "before Spring Security" - order numbers do not cross from the gateway chain to `WebFilter`s; Security always runs first.
 - Agent puts `switchIfEmpty(chain.filter(exchange))` after a branch that already called `chain.filter` - `Mono<Void>` never emits a value, so the remaining filters run twice.
 - Agent wraps `chain.filter(...).awaitSingleOrNull()` in `withTimeout` meant for a pre-check - every slower backend response is cut off: a 500, or an empty 200 when a catch-all fallback re-runs the chain.
-- Agent's fallback calls `chain.filter` again from `catch (e: Exception)` - backend errors and timeouts re-run the chain, and cancellation is caught too.
+- Agent's fallback calls `chain.filter` again from `catch (e: Exception)` - backend connection errors and timeouts re-run the chain (an HTTP 5xx answer does not), and cancellation is caught too.
 - Agent compares `pathWithinApplication().value()` with a configured path - percent-encoded variants pass the matchers and reach the backend but skip the check.
 - Agent configures `globalcors` and expects CORS on Security's 401 - stage 1 responses never reach the gateway's CORS handling; add `cors { }` to the security chain.
 - Agent imports `org.springframework.security.config.annotation.web.invoke` in a WebFlux app - that is the servlet DSL; use `org.springframework.security.config.web.server.invoke`.
-- Agent uses `fromTrustedIssuers` with JWK-set-only issuers - it requires OIDC discovery; build the managers with the constructor.
+- Agent uses `fromTrustedIssuers` with JWK-set-only issuers - it requires OIDC discovery or RFC 8414 metadata; build the managers with the constructor.
 - Agent puts `@Order` on the `@Bean` method of a lambda `GlobalFilter` - the gateway ignores it and runs the filter last, just before routing.
-- Agent adds response headers in `chain.filter(exchange).then { }` - before `NettyWriteResponseFilter` the response is already committed; use `beforeCommit`.
+- Agent adds response headers after the chain (`chain.filter(exchange).then(Mono.fromRunnable { })`) - before `NettyWriteResponseFilter` the response is already committed; use `beforeCommit`.
 - Agent copies routes or CORS under `spring.cloud.gateway.*` from older docs - Gateway 5.0 binds only `spring.cloud.gateway.server.webflux.*`; the old keys are ignored silently.
 - Agent adds the `CircuitBreaker` route filter without a time limiter setting - every backend slower than 1 s gets 504.
 - Agent sets `trusted-proxies: ".*"` - client-sent `X-Forwarded-*` values are kept and appended, so the leftmost entry is attacker-controlled.
 - Agent leaves CSRF on in a bearer-token gateway - token-less POSTs to `permitAll` routes (login) get 403.
 - Agent builds per-issuer decoders with `withJwkSetUri(...).build()` and relies on `audiences` - hand-built decoders check neither `iss` nor `aud`; set the validators.
+- Agent expects RFC 9068 `at+jwt` access tokens to pass the default validators - every default decoder accepts only `typ` `JWT` or none; pass a `JwtTypeValidator` that allows `at+jwt` and `application/at+jwt`.
 - Agent relies on a `GlobalFilter` rate limiter to protect JWT verification - requests with unknown `kid`s fail before it and each one refetches the JWK set.
 - Agent returns a `Mono` from inside `mono { }` instead of awaiting it - `.then()` drops the value, so that `Mono` is never subscribed and its body is never written.
 - Agent stubs `GatewayFilterChain` with a counter on calls - a Mono built once and subscribed twice counts once; count inside `Mono.defer`.
