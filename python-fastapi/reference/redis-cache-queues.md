@@ -5,7 +5,10 @@ Applies to `redis` 8.1 (`redis.asyncio`) against Redis 8, and `arq` 0.25 as the 
 (`RuntimeError: There is no current event loop`, it calls `asyncio.get_event_loop()`); run workers
 on 3.13, or set a loop before the worker is built (`asyncio.set_event_loop(asyncio.new_event_loop())`
 before `run_worker(...)`, or at the top of the module that defines `WorkerSettings` for the CLI).
-Enqueueing works.
+Enqueueing works. Under `python -W error::DeprecationWarning` the 0.25 worker also aborts at
+startup (it calls `asyncio.iscoroutinefunction`, deprecated in 3.14). arq 0.28 (2026-04,
+maintenance mode) fixes the loop but requires `redis<6`, so it cannot be installed next to
+redis-py 8 (package metadata, not run).
 Redis answers fast and rarely raises, which is exactly why the mistakes below stay hidden.
 
 Contents: [Client](#client) · [Keys and expiry](#keys-and-expiry) · [Locks](#locks) ·
@@ -88,8 +91,15 @@ Redis = Annotated[redis.Redis, Depends(get_redis)]
 - `delete("user:*")` deletes nothing (a literal key named `user:*`) and returns `0`. Enumerate
   with `scan_iter("user:*")` and delete the matches; `KEYS` blocks the server (5 ms for 50k keys
   here, seconds in a large keyspace) and is the wrong tool in a request.
-- Every cache key needs a TTL; a keyspace without expiry grows until `maxmemory` and then either
-  evicts (`allkeys-lru`) or refuses writes (`noeviction`), depending on the server, not on your code.
+- Every cache key needs a TTL. What happens when memory runs out depends on the server, not on
+  your code (Redis 8.10). The `redis:8` image starts with `maxmemory 0` (no limit) and
+  `noeviction`: nothing is refused, and the keyspace grows until the container's memory limit
+  OOM-kills Redis (exit 137; whatever was not yet persisted is lost; clients get
+  `ConnectionError`). With `maxmemory` set, `noeviction` refuses writes with
+  `redis.exceptions.OutOfMemoryError` (a `ResponseError`, not a `ConnectionError`; reads and
+  `DEL` still work, and a few writes still succeed near the limit), `allkeys-lru` and
+  `allkeys-lfu` evict silently, and a `volatile-*` policy evicts only keys that have a TTL, so a
+  keyspace without TTLs is refused as with `noeviction`.
 
 ## Locks
 
@@ -177,6 +187,7 @@ async def enqueue_report(report_id: str) -> str | None:
 - Agent passes `socket_timeout=None` "to avoid timeouts" - requests hang forever when Redis stalls.
 - Agent runs an `arq` worker on Python 3.14 - it fails at startup.
 - Agent forgets `decode_responses` - `bytes` values, comparisons never match.
+- Agent relies on Redis to evict old cache entries - the `redis:8` image sets no `maxmemory`, so nothing is evicted and, in a container with a memory limit, Redis is OOM-killed; set `maxmemory`, and an `allkeys-*` policy only on a cache-only instance (it evicts queue and lock keys too).
 - Agent stores a model with `model_dump_json` (or `json.dumps(..., default=str)`) and reads it back with `json.loads` - datetimes and decimals come back as strings.
 - Agent keeps a module-level client - `Event loop is closed` in tests.
 - Agent switches from `from_url` to `Redis(host=...)` - a dead server now costs seconds of retries per call.

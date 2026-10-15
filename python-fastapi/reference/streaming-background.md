@@ -159,8 +159,14 @@ async def events(request: Request) -> EventSourceResponse:
 ```
 
 - Prefer `sse-starlette` over a hand-written `StreamingResponse(media_type="text/event-stream")`.
-  Besides the framing it sets `Cache-Control: no-store` and `X-Accel-Buffering: no`; without the
-  latter, nginx buffers the stream and events arrive in batches, or never.
+  Besides the framing it sets `Cache-Control: no-store` and `X-Accel-Buffering: no`. nginx's
+  default `proxy_buffering on` alone did not hold events back (nginx 1.31, events up to 40 KB,
+  HTTP/1.0 and 1.1 upstream). When nginx also gzips the stream (`gzip on` with
+  `text/event-stream` in `gzip_types`, and a client that accepts gzip), a stream without the
+  header arrived in one piece when it ended, and an endless one delivered nothing in a 12 s
+  window; the header, or `proxy_buffering off` on that location, delivered each event at once.
+  nginx hides the header from the client by default (`proxy_pass_header` passes it). Not
+  measured: `proxy_cache`, HTTP/2 to the client, ingress-nginx, other proxies.
 - FastAPI 0.142 also ships its own `fastapi.sse.EventSourceResponse` and `ServerSentEvent`, with no
   extra dependency: declare `response_class=EventSourceResponse` and write the handler as an async
   generator that yields `ServerSentEvent(event=..., data=...)`. It sends `Cache-Control: no-cache`
@@ -168,7 +174,11 @@ async def events(request: Request) -> EventSourceResponse:
   from `sse-starlette` (3.5): it has no `send_timeout` (passing one is a `TypeError`), so a client
   that stops reading is not cut off; it does not end streams at shutdown (next point); and a
   generator that never awaits does not hang the server, because FastAPI awaits between events
-  itself. Event ids and `Last-Event-ID` handling are your job with either.
+  itself. Event ids and `Last-Event-ID` handling are your job with either. `ServerSentEvent(data=...)`
+  JSON-serializes every value except `None`, a `str` included (`data: "hello"` on the wire, so a
+  pre-serialized JSON string reaches the browser double-encoded); pass such strings as
+  `raw_data=`. `data=None` sends no `data:` line at all; send a JSON null as `raw_data="null"`.
+  `sse-starlette` sends a `str` `data` verbatim.
 - With `fastapi.sse`, the generator's `finally` runs promptly when a client that was keeping up
   disconnects while the generator waits on its own `await` (otherwise see
   [Generator endpoints](#generator-endpoints)). When the client goes away while the stream is
@@ -185,8 +195,10 @@ async def events(request: Request) -> EventSourceResponse:
   `fastapi.sse` client connected it was still running 10 s after SIGTERM and stopped only when the
   client left. Serve streaming apps with `uvicorn` and the flag.
 - An event stream has no end. Clients (`EventSource`) reconnect automatically and send
-  `Last-Event-ID`; `sse-starlette` does nothing with it. Give events ids, read
-  `request.headers.get("last-event-id")`, and resume from it yourself.
+  `Last-Event-ID` (Chrome: about 3 s after the stream ends unless the server sent `retry:`, with
+  the last id it received); `sse-starlette` and `fastapi.sse` pass the header through and do
+  nothing with it. Give events ids, read `request.headers.get("last-event-id")`, and resume from
+  it yourself.
 - Each open stream is a coroutine holding a connection; per-worker limits and the load balancer's
   idle timeout apply. `sse-starlette` sends periodic `ping` comments so idle proxies do not close
   the connection.
@@ -329,7 +341,7 @@ async def enqueue(job_id: str) -> None:
 
 - Agent validates inside the streaming generator - the client gets `200` plus a truncated body when it fails.
 - Agent streams a long export from a request-scoped session without committing first - the connection is held for the whole stream.
-- Agent hand-rolls SSE with `StreamingResponse` - no `X-Accel-Buffering`, nginx batches or swallows the events.
+- Agent hand-rolls SSE with `StreamingResponse` and no `X-Accel-Buffering: no` - behind an nginx that buffers (the default) and gzips `text/event-stream`, events arrive only when the stream ends, or not at all.
 - Agent gives SSE events no ids - reconnecting clients lose or repeat events.
 - Agent writes an endless generator that never awaits for `sse-starlette` or a returned `StreamingResponse` - after one client disconnects the loop spins and the service hangs.
 - Agent adds an SSE endpoint with `fastapi.sse` or `StreamingResponse` and leaves the uvicorn command unchanged, or serves it with `fastapi run` - with one client connected the server no longer stops on SIGTERM; run uvicorn with `--timeout-graceful-shutdown`.
@@ -357,6 +369,7 @@ async def enqueue(job_id: str) -> None:
 - Agent raises the server and proxy timeouts to make a long request fit - a different layer times out next; uvicorn itself has no request timeout, so the problem only shows behind a proxy.
 - Agent writes a `def` WebSocket handler - it runs on the loop and ends in a `500` handshake.
 - Agent expects `sse-starlette` to resume from `Last-Event-ID` - the header is delivered, nothing else.
+- Agent passes a pre-serialized JSON string as `fastapi.sse` `ServerSentEvent(data=...)` - it is JSON-encoded again and the browser gets a quoted string; use `raw_data=`.
 
 ## Official sources
 

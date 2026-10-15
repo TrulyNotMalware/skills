@@ -36,8 +36,11 @@ Contents: [Dependencies](#dependencies) · [Linting with ruff](#linting-with-ruf
   later; pip 25.0 rejects the option) or with `uv sync`.
 - `requires-python = ">=3.14"` in `pyproject.toml` is enforced only when the project itself is
   installed (`pip install .`); `pip install -r requirements.txt` never reads it, and pip ignores
-  `.python-version`. uv uses `.python-version` to pick the interpreter, and a pin outside
-  `requires-python` is an error (uv 0.13). Set both, and pin the interpreter in the image.
+  `.python-version`. uv uses `.python-version` to pick the interpreter (uv 0.13): a pin outside
+  `requires-python` fails `uv sync` and `uv run` (exit 2, no `.venv`) but is only a warning for
+  `uv venv`, which creates the mismatched venv. A pinned interpreter that is not installed is
+  downloaded first; with `UV_PYTHON_DOWNLOADS=never` the command fails with "No interpreter
+  found" instead. Set both, and pin the interpreter in the image.
 - FastAPI's `standard` extra installs `httpx` (`<1.0`, not `httpx2`), `python-multipart`,
   `email-validator`, `uvicorn[standard]`, `pydantic-settings`, `pydantic-extra-types`, the OpenTelemetry SDK and OTLP
   exporter, `jinja2`, and the `fastapi` CLI (`standard-no-fastapi-cloud-cli` leaves the cloud
@@ -133,11 +136,16 @@ warn_required_dynamic_aliases = true
 - Containers: run as a non-root user; set `PYTHONUNBUFFERED=1`, or buffered stdout output
   (`print`, `sys.stdout.write`) is lost on SIGKILL and `os._exit` when stdout is a pipe
   (`logging.StreamHandler` flushes after every record and is not affected; stderr is line
-  buffered, so only a partial last line is lost); and make the stop signal reach Python: a shell-form `CMD` can
-  leave the shell as the parent process, always with a pipeline, and with `&&`, `;` or `export`
-  first on shells that do not exec the last command (bash 3.2 does not; dash and bash 5.3 do).
-  The shell does not forward SIGTERM, so uvicorn never sees it and is killed when the grace
-  period ends. Use the `exec` form, or `exec uvicorn ...` as the last command.
+  buffered, so only a partial last line is lost); and make the stop signal reach Python. A
+  shell-form `CMD` runs under `/bin/sh -c`, and whether the shell replaces itself with the last
+  command depends on the shell. Debian's dash (the `/bin/sh` of the `python:*-slim` images,
+  bookworm and trixie) never does, so even a plain `CMD uvicorn app:app ...` leaves `sh` as
+  PID 1; bash 5.2 (`SHELL ["/bin/bash", "-c"]`) and busybox ash (alpine images) exec the last
+  command, also after `&&`, `;` or `export`; a pipeline keeps the shell in all three. macOS's
+  `/bin/dash` does exec it, so check inside the image, not on the host. A shell at PID 1 ignores
+  SIGTERM and does not forward it: `docker stop` waited its 10 s and killed the container
+  (exit 137), and the lifespan shutdown never ran (uvicorn 0.54). Use the `exec` form, or
+  `exec uvicorn ...` as the last command (stopped in 0.3 s, exit 0).
 - When the image is built with `uv sync --no-dev` and started with `uv run ...`, uv syncs again
   before running and installs the `dev` group (uv 0.13, measured outside a container). That needs
   the network at startup and changes the environment that was built. Start with
@@ -162,7 +170,7 @@ warn_required_dynamic_aliases = true
 - Agent creates engines or clients at import time - duplicated per spawned uvicorn worker, shared across gunicorn `--preload` forks.
 - Agent uses in-process caches or rate limits with `--workers` - per-process state.
 - Agent deploys behind a load balancer with default `--forwarded-allow-ips` - client address and scheme are wrong.
-- Agent writes a shell-form `CMD` with a pipeline or without `exec` - depending on the shell, SIGTERM goes to the shell, not to uvicorn.
+- Agent writes a shell-form `CMD uvicorn ...` on a `python:*-slim` image - dash keeps `sh` as PID 1, SIGTERM is dropped and the container is killed after the grace period; use the exec form.
 - Agent omits `PYTHONUNBUFFERED=1` and logs with `print` - the last lines before a kill are missing.
 - Agent runs uvicorn without `[standard]` and adds WebSocket routes - upgrades are answered as plain HTTP with a warning.
 - Agent puts `select` at both levels of the ruff config - `lint.select` wins and the top-level entries are dropped.
