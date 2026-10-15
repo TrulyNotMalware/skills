@@ -1,7 +1,6 @@
 # skills
 
-Claude Code skills and function-hook mods, written and maintained by one person for the stacks
-they work on. Each skill states general practice for a pinned version of a stack and leads with
+Claude Code skills, written and maintained by one person for the stacks they work on. Each skill states general practice for a pinned version of a stack and leads with
 the mistakes that compile, start and pass unit tests anyway. Every claim was run on the pinned
 versions before it was written down; the version table at the top of each `SKILL.md` says what
 was verified and when.
@@ -35,7 +34,7 @@ ln -s ~/workspace/skills/kotlin-spring-boot ~/.claude/skills/kotlin-spring-boot
 ## Checking a skill
 
 ```sh
-python3 scripts/check-skill.py                 # every skill, plus a privacy scan of README, AGENTS.md and mods/
+python3 scripts/check-skill.py                 # every skill, plus a privacy scan of the top-level Markdown files
 python3 scripts/check-skill.py python-fastapi  # one skill
 ```
 
@@ -44,22 +43,6 @@ the Agent Skills specification, table column counts, the routing table, stray `.
 that nothing machine-specific (home directory paths, e-mail addresses, the author's wiki, skills
 that live only on the author's machine, dated incident notes) or project-specific (names listed
 in the git-ignored `scripts/private-terms.txt`) appears in the text.
-
-## Mods
-
-`mods/` holds Claude Code plugins made of function hooks. Unlike a skill, which the model reads,
-a mod runs in the harness and refuses, rewrites or displays tool calls.
-
-| Mod | What it does |
-| --- | --- |
-| [wiki-guard](mods/wiki-guard) | Enforces a personal wiki's edit rules at tool-call time: `raw/` is immutable, `log.md` is append-only, public pages never link local-only pages, commits wait for the linter. |
-| [infra-pane](mods/infra-pane) | A live pane and status line for a local infra testbed: compose services, the OrbStack k8s cluster, Tailscale, with start and stop buttons and toggles. |
-| [infra-preflight](mods/infra-preflight) | Refuses `docker compose up` on an infra service while Tailscale is down or the service's `BIND_IP` has drifted from the Tailscale address. |
-
-They are bound to the author's machine (`~/workspace/llm_wiki`, `~/infra`, Tailscale, OrbStack)
-and are published as working examples of the hook API, not as drop-in tools. The hook API is
-early access; `.claude-plugin/types/` and each mod's `tsconfig.json` are generated when the mod
-loads and are not committed. Each mod has an `enabled` switch in `/config`.
 
 ## Reading list
 

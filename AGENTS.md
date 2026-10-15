@@ -17,7 +17,7 @@ skills/
 ├── claude/                   # 기타 참고 문서(복사본). git 미추적
 ├── scripts/check-skill.py    # 스킬 구조 검사 (링크·앵커·frontmatter·description 길이·표 열 수·안내표·stray .omc·비공개 문자열)
 ├── scripts/private-terms.txt # check-skill.py 가 잡을 프로젝트·회사 이름. git 미추적
-├── mods/<mod-name>/          # Claude Code mod(함수 훅 플러그인). SKILL.md 없음, check-skill.py 대상 아님 — 아래 「mods」
+├── mods/<mod-name>/          # Claude Code mod(함수 훅 플러그인). SKILL.md 없음, check-skill.py 대상 아님. 개인 인프라 전제라 git 미추적 — 아래 「mods」
 └── <skill-name>/             # 스킬 하나 = 디렉터리 하나
     ├── SKILL.md              # 핵심(~150줄 이하): 대상 버전 표, 공통 규칙, 참조 안내표, Gotchas
     └── reference/*.md        # 주제별 상세. SKILL.md 의 안내표로만 로드된다
@@ -122,6 +122,8 @@ ln -s ~/workspace/skills/<skill> ~/.claude/skills/<skill>   # 최초 1회
 **claude.ai(모바일·웹·데스크톱 채팅)에서도 쓰려면 따로 올린다 (2026-10-14).** `~/.claude/skills/` 는 claude.ai 로 올라가지 않는다. 저장소 루트에서 `zip -r <skill>.zip <skill>`(폴더가 ZIP 루트, 폴더명 = frontmatter `name`, `.omc`·`.DS_Store` 제외)로 묶어 claude.ai Customize > Skills > Add > Upload skill 에 넣는다(여러 ZIP 동시 가능). 7개 모두 frontmatter 수정 없이 보안 스캔을 통과했다. 주의 — (1) Overview·목록의 description 은 500자에서 잘려 보이지만 저장은 전문이다(되돌아온 사본으로 확인). (2) 올린 스킬은 몇 분 안에 `~/.claude/skills/synced/<uuid>/<skill>/` 로 되돌아와 Claude Code 목록에 `anthropic-skills:<skill>` 로 한 번 더 뜬다 — 심볼릭 링크 원본과 중복. 끄려면 사용자 설정 `syncClaudeAiSkills: false`. (3) 스킬을 고쳐도 claude.ai 쪽은 자동 갱신되지 않으므로 ZIP 을 다시 올린다(재업로드가 새 버전이 되는지 별도 스킬이 되는지는 미확인). 실측 기록은 위키 `skills-authoring.md` 「claude.ai 업로드」.
 
 ## mods — Claude Code 함수 훅 플러그인 (2026-10-07)
+
+**개인 인프라(위키·`~/infra`·Tailscale·OrbStack)에 기대는 mod 는 공개 저장소에 올리지 않는다 (2026-10-15 사용자 지시).** 현재 3개 모두 해당해 `.gitignore` 에 이름으로 올라 있고 노트북 디스크에만 있다 — git 이력·원격 백업이 없으니 고치기 전에 사본을 둔다. 개인 인프라 없이 도는 mod 만 추적한다. 2026-10-07 ~ 10-15 의 공개 이력에는 남아 있다.
 
 `mods/<mod>/` 는 스킬이 아니라 **mod** 다: `.claude-plugin/plugin.json` + `hooks/hooks.json` + `hooks/register.ts(x)` (+ `types/index.d.ts` 상태 계약, `tests/*.test.ts(x)`). 모델이 읽는 절차(스킬)와 달리 하네스가 도구 호출을 **거부·재작성·표시**한다. 현재: `wiki-guard`(위키 편집 규칙 강제), `infra-pane`(`~/infra` 상태 pane·`/infra`), `infra-preflight`(infra 기동 전 Tailscale·BIND_IP 검사). 결정·검증·API 델타는 위키 `wiki/tech/claude-code-mods.md` 에만 기록한다.
 
