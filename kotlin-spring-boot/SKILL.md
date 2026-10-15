@@ -59,10 +59,10 @@ anything version- or convention-related.
    "exactly 15 blocks" as the mode, not as the count. The complete list is in
    `build/reports/problems/problems-report.html` (distinct `"path":…,"line":` entries); on Gradle
    9.8.0 + KGP 2.4.10 `--warning-mode=summary` printed them nowhere on the console, so read the report
-   (2026-10-06, one project's presets: 16 warnings reported as 0). An UP-TO-DATE compile
+   (with the mode set by a preset, a build carrying 16 warnings reported 0). An UP-TO-DATE compile
    task prints no warnings; force it with `--rerun-tasks` (or after `clean`). The same applies to
    test evidence: with `org.gradle.caching=true`, `clean build` restores unchanged `test` tasks
-   FROM-CACHE (Gradle 9.7.1, measured 2026-10-06), so only `--rerun-tasks` proves the tests ran now;
+   FROM-CACHE (Gradle 9.7.1), so only `--rerun-tasks` proves the tests ran now;
    check the `build/test-results` timestamps ("Malformed input" from `:test` is a locale problem: see
    [gradle-build](reference/gradle-build.md#build-behavior-and-verification)).
 
@@ -97,7 +97,7 @@ mechanism, the concrete reason, the minimal fix, and how you verified it. Do not
 | `@Transactional`, rollback, propagation, optimistic-lock retry, after-commit events, `@Retryable` | [reference/transactions.md](reference/transactions.md) |
 | REST controllers, request validation, error responses (ProblemDetail), idempotent POST, pagination, API versioning | [reference/web-errors.md](reference/web-errors.md) |
 | Choosing coroutines vs virtual threads, `suspend` controllers/schedulers, structured concurrency, cancellation, dispatchers, context propagation, `Flow` | [reference/coroutines.md](reference/coroutines.md) |
-| Gradle multi-module structure, BOM import and version overrides, `api`/`implementation`, exclusions, compiler options, build verification (version bumps: use the `dependency-bump` skill) | [reference/gradle-build.md](reference/gradle-build.md) |
+| Gradle multi-module structure, BOM import and version overrides, `api`/`implementation`, exclusions, compiler options, build verification | [reference/gradle-build.md](reference/gradle-build.md) |
 | Profiles and config sources, Actuator health/probes, Micrometer metrics, observations/tracing, logging, graceful shutdown | [reference/config-observability.md](reference/config-observability.md) |
 | Calling other services: `RestClient`, HTTP interface clients (`@ImportHttpServices`), `WebClient`, timeouts, retries, errors in 2xx bodies, consuming streams (SSE/NDJSON), client tests | [reference/http-clients.md](reference/http-clients.md) |
 | WebFlux `WebFilter`s, Spring Cloud Gateway global/route filters and their order, `mono { }` filters, gateway defaults (property prefix, circuit-breaker timeout, forwarded headers), raw vs decoded paths, CORS on 401, reactive CSRF and JWT (multi-issuer, validators, JWK fetch), tests through the real gateway chain | [reference/webflux-gateway.md](reference/webflux-gateway.md) |
@@ -152,4 +152,4 @@ These are the Kotlin-specific failures that compile fine and pass unit tests.
 When bumping the target versions: update the table above, then grep this directory for version tags
 (`Boot 4`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `Spring Cloud 2025`, `Gateway Server WebFlux`,
 `Security 7.1`) and re-verify each tagged statement against the
-official docs. The change history is kept outside this directory, in the author's wiki.
+official docs.

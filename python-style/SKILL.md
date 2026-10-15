@@ -143,5 +143,4 @@ says which tool, if any, reports the problem.
 When bumping the target versions: update the table above, then grep this directory for `Python 3.`,
 `3.14`, `ruff 0.`, `mypy 2.`, `pytest 9.`, `ty 0.`, `pyright 1.`, `typeshed`, `preview`, `PEP 6` and
 `PEP 7`, and re-run each tagged statement. Rule codes change status between ruff releases (preview
-to stable, renames); re-run the pitfall-to-rule mapping in `reference/idioms.md`. The change history
-is kept outside this directory, in the author's wiki.
+to stable, renames); re-run the pitfall-to-rule mapping in `reference/idioms.md`.

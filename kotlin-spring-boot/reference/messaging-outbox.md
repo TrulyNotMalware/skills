@@ -290,8 +290,7 @@ Custom relay rules:
 - Agent stamps a row's schema version with a first-match `when` (`is NewShapeA -> V5; has fallback -> V4; …`) - a row that combines
   two new shapes gets the lower version, so a binary that knows only that version decodes it and silently drops the newer field
   (Jackson ignores unknown properties). Stamp the highest version any part of the envelope needs, including continuation parts and
-  nested messages, and pin the combined case. (Caught in a design review before the code existed, 2026-10-14; the project's earlier
-  first-match rule had already mis-stamped a nested fallback.)
+  nested messages, and pin the combined case.
 - Agent adds long in-process retries - the consumer thread sleeps and can exceed `max.poll.interval.ms`.
 - Agent sends dead-lettered `byte[]` values through a JSON template - they are silently Base64-corrupted.
 - Agent assumes Kafka's JSON deserializer uses Boot's `JsonMapper` - it builds its own; the Kotlin module must be on the classpath.

@@ -70,7 +70,7 @@ Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-
 - **What happens:** sustained rate limiting alone (about 50 minutes of 429 responses in the
   incident) made the code give up on healthy messages.
 - **Recorded remedy:** keep the ownership token and the send budget in separate fields.
-- **Second incident (2026-10-12):** a claim token made of the attempt count alone collided after a manual
+- **A second incident:** a claim token made of the attempt count alone collided after a manual
   requeue reset the count. A late finisher from an old claim matched a newer claim, gave its attempt back,
   and the newer claim's paid result was discarded (a review lane's probe). The token became the pair of
   attempt count and claim timestamp, pinned by a test that fails when the timestamp comparison is removed.
@@ -81,7 +81,7 @@ Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-
   up after N attempts; a fix gives the attempt back and stops the run for failures that are not the item's
   fault (bad credentials, exhausted quota, rate limits, an outage); the queue hands out the highest-priority
   due job first.
-- **What happened, one fix after another (2026-10-12; each defect reproduced by a review lane's probe):**
+- **What happened, one fix after another (each defect reproduced by a review lane's probe):**
   1. No refund except for 401 and 403: an exhausted credit balance (a 400) or a mistyped model name (a 404)
      failed every queued job for good.
   2. Refund without a bound: an item that always produced a refundable failure (a timeout on that input)
