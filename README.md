@@ -41,9 +41,9 @@ python3 scripts/check-skill.py python-fastapi  # one skill
 
 The script checks relative links and anchors, the frontmatter, the description length limit of
 the Agent Skills specification, table column counts, the routing table, stray `.omc/` state, and
-that nothing machine-specific (home directory paths, e-mail addresses, the author's wiki) or
-project-specific (names listed in the git-ignored `scripts/private-terms.txt`) appears in the
-text.
+that nothing machine-specific (home directory paths, e-mail addresses, the author's wiki, skills
+that live only on the author's machine, dated incident notes) or project-specific (names listed
+in the git-ignored `scripts/private-terms.txt`) appears in the text.
 
 ## Mods
 

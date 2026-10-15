@@ -160,4 +160,4 @@ When bumping versions: update the table above, then grep this directory for `too
 `modernc`, `fsnotify`, `goose`, `client_golang`, `otel`, `#81970` and re-run each tagged
 statement. Re-run the body-drain measurements first (http-server's `MaxBytesReader` table,
 http-client's body drain); they changed between 1.26 and 1.27, while the server timeout, shutdown
-and disconnect tables were identical on go1.26.8 and go1.27.1. The change history is kept outside this directory, in the author's wiki.
+and disconnect tables were identical on go1.26.8 and go1.27.1.

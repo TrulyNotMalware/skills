@@ -175,7 +175,7 @@ effect is wanted.
   `minOf(cap, …)` after the shift hides the wrap for most inputs. Cap the exponent before shifting
   (`1L shl minOf(attempts, 6)`). A test for that cap must use an exponent whose wrapped value falls
   **below** the cap (attempts 64 → `1L`): attempts 71 gives 64 units, which a 60-unit cap swallows,
-  so the test passed with the cap removed (observed 2026-10-08).
+  so the test passed with the cap removed.
 - Division and remainder truncate toward zero: `-7 / 2 == -3`, `-7 % 2 == -1`, `(-7).mod(2) == 1`,
   `Math.floorDiv(-7, 2) == -4`. Note `-7.mod(2) == -1`: unary minus applies after the call.
 - Conversions truncate and saturate: `2.9.toInt() == 2`, `(-2.9).toInt() == -2`,

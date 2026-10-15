@@ -1,9 +1,8 @@
 # Gradle Kotlin DSL builds for Spring Boot
 
 Multi-module Gradle builds with the Kotlin DSL (Gradle 9.x, Kotlin 2.4, Boot 4.1). Plugin and flag
-basics are in [kotlin-spring-basics](kotlin-spring-basics.md#build-setup-gradle-kotlin-dsl). For
-raising versions (what to bump, how to verify, Dependabot), use the `dependency-bump` skill instead
-of this file.
+basics are in [kotlin-spring-basics](kotlin-spring-basics.md#build-setup-gradle-kotlin-dsl).
+Raising versions (what to bump, how to verify, Dependabot) is not covered here.
 
 Contents: [Know who owns each version](#know-who-owns-each-version) ·
 [Importing the Spring Boot BOM](#importing-the-spring-boot-bom) ·

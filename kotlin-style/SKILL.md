@@ -54,8 +54,8 @@ and the root `AGENTS.md`/`CLAUDE.md` first.
    exactly 15 blocks means the list was cut. The complete list is always in
    `build/reports/problems/problems-report.html` (count the distinct `"path":…,"line":` entries);
    on Gradle 9.8.0 with KGP 2.4.10, `--warning-mode=summary` printed the warnings nowhere on the
-   console, so the report, not the console, is the source of truth (2026-10-06: a project preset had
-   the property, and "0 warnings" was reported for a build that carried 16). An UP-TO-DATE compile task
+   console, so the report, not the console, is the source of truth (with the property set by a preset,
+   "0 warnings" was reported for a build that carried 16). An UP-TO-DATE compile task
    prints none, so force the compile (`--rerun-tasks` or after `clean`). Then run the project's
    ktlint and detekt tasks.
 5. For behaviour that no tool reports (see Gotchas), write a test with the edge value: `null`, an
@@ -153,5 +153,4 @@ says which tool, if any, reports the problem.
 When bumping the target versions: update the table above, then grep this directory for
 `Kotlin 2.`, `2.4`, `2.5`, `ktlint 1.`, `detekt 1.`, `detekt 2.`, `-X` and `alpha`, and re-run each
 tagged statement. Compiler diagnostics and detekt rules change between releases (new K2 checks,
-detekt 2.0 leaving alpha); re-run the pitfall-to-tool mapping in the references. The change
-history is kept outside this directory, in the author's wiki.
+detekt 2.0 leaving alpha); re-run the pitfall-to-tool mapping in the references.
