@@ -89,6 +89,11 @@ class BackgroundJobs : DisposableBean {
     or catch narrower exception types.
   - `runCatching { suspendCall() }` also catches it and turns cancellation into a `Result.failure`.
     Avoid `runCatching` around suspend calls, or rethrow when the failure is a `CancellationException`.
+  - Not every `CancellationException` is your coroutine's: awaiting a future that someone else
+    cancelled throws one while your coroutine is still active. Where that case should count as an
+    ordinary failure, call `currentCoroutineContext().ensureActive()` in the catch instead of
+    `throw e`: it throws only when this coroutine is cancelled (measured with a cancelled
+    `CompletableFuture.await()` inside a WebFlux filter, kotlinx-coroutines 1.10.2).
 - Timeouts: `withTimeout` throws `TimeoutCancellationException` (a `CancellationException`), which
   cancels the block. `withTimeoutOrNull` returns `null`. Set explicit timeouts on remote calls too; a
   coroutine timeout does not close a blocking socket.

@@ -21,6 +21,7 @@ Contents: [Choose the smallest test that would have failed](#choose-the-smallest
 | Repository queries, mappings, locking, constraints | `@DataJpaTest` slice on the production DB engine |
 | Wiring: which bean is injected, proxies, transactions, config binding | `@SpringBootTest` (or `ApplicationContextRunner` for configuration) |
 | Broker/DB boundary behavior (Kafka, CDC, outbox) | `@SpringBootTest` + embedded broker or Testcontainers |
+| WebFlux / gateway filter interplay (filter order, chain run twice, timeouts around the proxied call, CORS on 401) | `@SpringBootTest(webEnvironment = RANDOM_PORT)` + a stub backend on a real socket ([webflux-gateway](webflux-gateway.md#testing-the-real-chain)) |
 
 - Unit tests are the default. Move up only when the behavior lives in the framework: proxies, binding,
   transactions, serialization, security, or SQL.
@@ -126,7 +127,10 @@ runs the whole leaf elsewhere, so even a plain repository `save` there commits (
 
 - Register Spring with `@ApplyExtension(extensions = [SpringExtension::class])` on the spec
   (`io.kotest.extensions.spring.SpringExtension`), or once in the project config. The no-arg form
-  uses `SpringTestLifecycleMode.Test`.
+  uses `SpringTestLifecycleMode.Test`. Inside the spec, call `extensions(SpringExtension())` from
+  `init` (field injection only: the spec already exists when `init` runs, so constructor injection
+  needs `@ApplyExtension` or the project config). `override fun extensions()` does not compile in
+  Kotest 6 (it is final).
 - Inject through an `@Autowired constructor(...)`. Field injection with `lateinit var` also works,
   but the constructor form matches production code.
 - **Transaction scope follows the lifecycle mode.** In `Test` mode, Spring's test transaction wraps
@@ -142,6 +146,12 @@ runs the whole leaf elsewhere, so even a plain repository `save` there commits (
   there, or register the Root-mode extension in the project config.
 - When a container step needs a transaction (lazy loading, locks, first-level cache effects), wrap it
   in `TransactionTemplate` explicitly, as `inTx` above.
+- `@DynamicPropertySource` and the annotation's `properties` do not merge one indexed list: Boot binds
+  the whole list from the higher-precedence source, so an element split between them loses fields and
+  elements set only in the annotation are dropped. Keep each list in one source.
+- Class-annotation arguments do not see companion members by simple name: `@SpringBootTest(properties
+  = ["x=$C"])` with `C` in the spec's companion is unresolved, private or not. Qualify it or declare
+  the const at top level.
 - **Isolation mode:** Kotest's default is `SingleInstance`. One spec instance runs all its tests, so
   `val`s declared in the spec body or in `given` blocks are shared across sibling tests. Mutable state
   there leaks between tests. Create fresh state inside the block that uses it, or set

@@ -2,16 +2,16 @@
 name: kotlin-spring-boot
 description: >
   Conventions and pitfalls for Kotlin + Spring Boot 4 backends (Gradle Kotlin DSL, JPA/Hibernate 7,
-  Kotest + MockK). Use when writing, reviewing, refactoring, or debugging Kotlin code in a Spring
-  Boot project: beans, DI and conditional beans, @ConfigurationProperties, Jackson, JPA entities,
+  Kotest). Use when writing, reviewing, refactoring, or debugging Kotlin code in a Spring
+  Boot project: beans, DI, conditional beans, @ConfigurationProperties, Jackson, JPA entities,
   repositories and fetch joins, @Transactional, optimistic locking, retries, REST controllers,
-  validation and ProblemDetail, @Scheduled jobs, @Async executors and virtual threads, coroutines,
-  Spring Security and webhook signature filters, RestClient and streaming HTTP clients, Spring
-  Modulith, Kafka, outbox and Debezium CDC, Actuator, metrics, tracing, graceful shutdown, tests
-  (Kotest, MockK, @WebMvcTest, @DataJpaTest, Testcontainers), Gradle builds and Kotlin compiler
-  plugins. Also use when a Spring feature silently does nothing in Kotlin (transaction not rolling
-  back, validation ignored, default argument ignored, proxy not applied, scheduled jobs not running
-  in parallel). Not for Android or Kotlin Multiplatform.
+  WebFlux and Spring Cloud Gateway filters, validation and ProblemDetail, @Scheduled jobs, @Async
+  executors and virtual threads, coroutines, Spring Security and webhook signature filters,
+  RestClient and streaming HTTP clients, Spring Modulith, Kafka, outbox, Debezium CDC, Actuator,
+  metrics, tracing, graceful shutdown, tests (Kotest, MockK, @WebMvcTest, @DataJpaTest,
+  Testcontainers), Gradle builds, compiler plugins. Also use when a Spring feature silently does
+  nothing in Kotlin (transaction not rolling back, validation ignored, default argument ignored,
+  proxy not applied, jobs not running in parallel). Not for Android or Kotlin Multiplatform.
 ---
 
 # Kotlin + Spring Boot
@@ -34,6 +34,7 @@ Verified 2026-09-28. Version-bound statements in this skill and its references a
 | Kotlin | 2.2+ (Boot minimum), 2.4.x in use | BOM default 2.3.21; libraries must end up aligned with the Kotlin plugin (see gradle-build) |
 | Build | Gradle Kotlin DSL, multi-module | |
 | Tests | Kotest 6 + MockK, SpringMockK 5 | JUnit 6 platform underneath |
+| Spring Cloud (gateway projects) | 2025.1.x, Gateway Server WebFlux 5.0 | Only [webflux-gateway](reference/webflux-gateway.md) depends on it (verified 2026-10-14, with Spring Security 7.1) |
 
 The project's own build files win over this table. Read `build.gradle.kts`, `settings.gradle.kts`,
 `gradle/libs.versions.toml` (if present), and the root `AGENTS.md`/`CLAUDE.md` before changing
@@ -62,7 +63,8 @@ anything version- or convention-related.
    task prints no warnings; force it with `--rerun-tasks` (or after `clean`). The same applies to
    test evidence: with `org.gradle.caching=true`, `clean build` restores unchanged `test` tasks
    FROM-CACHE (Gradle 9.7.1), so only `--rerun-tasks` proves the tests ran now;
-   check the `build/test-results` timestamps.
+   check the `build/test-results` timestamps ("Malformed input" from `:test` is a locale problem: see
+   [gradle-build](reference/gradle-build.md#build-behavior-and-verification)).
 
 When **diagnosing** ("annotation does nothing", startup failure, wrong bean, binding error), gather
 evidence before editing: the full `Caused by:` chain, the call site (does it cross a bean
@@ -98,6 +100,7 @@ mechanism, the concrete reason, the minimal fix, and how you verified it. Do not
 | Gradle multi-module structure, BOM import and version overrides, `api`/`implementation`, exclusions, compiler options, build verification | [reference/gradle-build.md](reference/gradle-build.md) |
 | Profiles and config sources, Actuator health/probes, Micrometer metrics, observations/tracing, logging, graceful shutdown | [reference/config-observability.md](reference/config-observability.md) |
 | Calling other services: `RestClient`, HTTP interface clients (`@ImportHttpServices`), `WebClient`, timeouts, retries, errors in 2xx bodies, consuming streams (SSE/NDJSON), client tests | [reference/http-clients.md](reference/http-clients.md) |
+| WebFlux `WebFilter`s, Spring Cloud Gateway global/route filters and their order, `mono { }` filters, gateway defaults (property prefix, circuit-breaker timeout, forwarded headers), raw vs decoded paths, CORS on 401, reactive CSRF and JWT (multi-issuer, validators, JWK fetch), tests through the real gateway chain | [reference/webflux-gateway.md](reference/webflux-gateway.md) |
 | Spring Security filter chains (Kotlin DSL), JWT resource server, authorities mapping, method security, webhook signature filters and responses, security tests | [reference/security.md](reference/security.md) |
 | Spring Modulith: module packages in Kotlin (`@PackageInfo`), `verify()`, `@ApplicationModuleListener`, event publication registry | [reference/modulith.md](reference/modulith.md) |
 | Kafka producers/consumers, `@KafkaListener`, error handlers and DLT, transactional outbox, Debezium CDC relays | [reference/messaging-outbox.md](reference/messaging-outbox.md) |
@@ -140,9 +143,13 @@ These are the Kotlin-specific failures that compile fine and pass unit tests.
   configures only the root project; modules compile without the flags.
 - Agent writes unit tests only for a wiring change - default-argument, qualifier, and proxy defects
   never appear in unit tests that construct the class directly.
+- In a WebFlux/gateway filter, agent subscribes to `chain.filter(...)` twice (`switchIfEmpty`, a `catch`
+  fallback) or wraps it in a pre-check's `withTimeout` - the remaining filters run twice, and slow
+  backends get a 500 or an empty 200 ([webflux-gateway](reference/webflux-gateway.md)).
 
 ## Maintaining this skill
 
 When bumping the target versions: update the table above, then grep this directory for version tags
-(`Boot 4`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`) and re-verify each tagged statement against the
+(`Boot 4`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `Spring Cloud 2025`, `Gateway Server WebFlux`,
+`Security 7.1`) and re-verify each tagged statement against the
 official docs.
