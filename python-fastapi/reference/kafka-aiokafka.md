@@ -55,9 +55,30 @@ async def publish(request: Request, topic: str, key: str, value: dict[str, Any])
   before it was queued, it is not. The caller cannot tell which, so a retry can publish the event
   twice, also with `enable_idempotence=True` (that deduplicates the producer's own retries, not a
   second `send`). Put an event id in the message and dedupe in consumers.
-- Defaults (0.14): `enable_idempotence=False`, `acks=1`, `linger_ms=0`. With `acks=1` a leader
-  that fails after acknowledging loses the message; a retried send can duplicate. Set
-  `enable_idempotence=True` for a producer whose messages matter.
+- Defaults (0.14): `enable_idempotence=False`, `acks=1`, `linger_ms=0`; `enable_idempotence=True`
+  without `acks` sets `acks="all"` and rejects `acks=1`. With `acks=1` a leader that fails after
+  acknowledging loses what its followers had not copied yet when one of them takes over: with
+  lagging in-sync followers all 100 acknowledged messages were gone after the failover, also
+  after the old leader rejoined; with healthy followers on one host, killing the leader
+  mid-stream lost none; with no follower left in sync the partition went offline instead and
+  lost nothing once the old leader returned (Kafka 4.3, three brokers, KRaft). Without
+  idempotence the producer's own retry after a lost response duplicates the batch (10 of 10,
+  with `acks=1` and `acks="all"`, no error to the caller); with `enable_idempotence=True` the
+  retry left no duplicates.
+- `acks="all"` waits for the in-sync replicas (ISR) only. Followers that lag or are fenced drop
+  out of the ISR, and when only the leader is left the broker default `min.insync.replicas=1`
+  still lets `acks="all"` writes succeed, acknowledged by one broker. Losing that broker took the
+  partition offline until it came back (unclean leader election off, the default); with
+  `unclean.leader.election.enable=true` a stale replica took over and all 100 acknowledged
+  messages were lost. For events that matter use replication factor 3
+  with `min.insync.replicas=2` on the topic, plus `enable_idempotence=True`.
+- With `min.insync.replicas=2` and only the leader in sync, `acks="all"` sends failed with
+  `NotEnoughReplicasError` after `request_timeout_ms` (40 s by default), and nothing was written.
+  With `enable_idempotence=True` the same sends raised nothing: aiokafka does not expire
+  idempotent batches and retries a retriable error such as `NotEnoughReplicasError` without end
+  (from source; non-retriable errors still fail the send), so `send_and_wait` waited until the
+  ISR recovered (59.5 s here) and then succeeded. Bound the wait in the caller, and treat a
+  timeout as "may still be delivered" (the timeout point above).
 - A serializer error (`TypeError: ... not JSON serializable`) is raised from `send`, before
   anything is queued.
 - Sending to a topic that does not exist **succeeds** when the brokers auto-create topics (the
@@ -178,6 +199,8 @@ the process ([streaming-background](streaming-background.md#backgroundtasks)).
 - Agent calls `producer.send(...)` without `await` - the message never leaves the process; only a `RuntimeWarning`.
 - Agent creates a producer per request - a connection and a metadata fetch per request.
 - Agent keeps `enable_idempotence=False` (the default) for important events - duplicates on retry, loss on leader failover.
+- Agent sets `acks="all"` and leaves the broker default `min.insync.replicas=1` - acknowledged messages can sit on one broker; use replication factor 3 and `min.insync.replicas=2`.
+- Agent expects an idempotent producer to fail fast while too few replicas are in sync - `send_and_wait` retries `NotEnoughReplicasError` with no end; bound the wait.
 - Agent misspells a topic name - auto-created, nobody consumes it, the send succeeds.
 - Agent starts a new consumer group with the default `auto_offset_reset` - existing messages are skipped.
 - Agent leaves auto-commit on with slow handlers - messages committed while being processed, lost on crash.

@@ -245,9 +245,12 @@ async def readyz(request: Request, response: Response) -> dict[str, str]:
 
 - With this handler the stalled, closed, black-holed and exhausted-pool cases answered `503` within
   2 s on asyncio and uvloop, also to 20 concurrent probes; the pool served the next check, and
-  shutdown on SIGTERM took 0.1-0.2 s (1.4 s with a probe in flight). Measured against a fake
-  server that speaks the PostgreSQL handshake and then stays silent, and again against a paused
-  PostgreSQL 17, with the same results.
+  shutdown on SIGTERM took about 0.2 s (1.4-1.6 s with a probe in flight). Measured against a fake
+  server that speaks the PostgreSQL handshake and then stays silent, against a paused
+  PostgreSQL 17, and against a black-holed address (connects stuck in `SYN_SENT` for 200 s: every
+  probe `503` in 2 s, two checks and two sockets held), with the same results. Without the
+  handler, a probe in flight against the black-holed host also holds shutdown: SIGTERM took
+  59.6 s, until asyncpg's connect timeout ended the request with a `500`.
 - Join only a recent check. A joined check has no bound of its own, and one stuck on a dead socket
   ends only when the socket does (asyncpg 0.31 sets no TCP keepalive, from source). Joining any
   running check kept every probe at `503` for 30 s after the database was back (SQLite simulation:
