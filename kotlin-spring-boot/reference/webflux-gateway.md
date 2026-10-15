@@ -231,7 +231,10 @@ Measured on Spring Security 7.1.0 with `oauth2ResourceServer { jwt { } }`:
   authorization: an expired or unreadable `Authorization: Bearer ...` on a `permitAll` route gets
   **401** `invalid_token`. Only a request without a bearer token passes. Clients must not attach a
   stale token to login or refresh calls (or give those paths a chain without `oauth2ResourceServer`).
-- **A decoder you build yourself checks only the signature, `exp` and `nbf`** (60 s clock skew).
+- **A decoder you build yourself checks neither `iss` nor `aud`.** Besides the signature, its default
+  validator (`JwtValidators.createDefault()`, Security 7.1.0, from source) checks only `exp`/`nbf`
+  (60 s clock skew), a `typ` header of `JWT` or none, and the client-certificate thumbprint of a token
+  bound with `cnf.x5t#S256`.
   `NimbusReactiveJwtDecoder.withJwkSetUri(...).build()` accepted a wrong and a missing `aud` (200),
   and `spring.security.oauth2.resourceserver.jwt.audiences`/`issuer-uri` configure only Boot's own
   decoder bean, never yours. Set the validators on each decoder:
