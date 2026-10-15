@@ -94,7 +94,7 @@ right but wrong together. This skill is the order of work that catches those bef
   said a lost status write would "re-deliver under a new event id"; the code's recovery sweep
   reclaims the same row, so the id never changes and the deduplication advice written from the
   finding was wrong. The finding was right about the risk and wrong about the path, and the
-  path was copied (caught by a cross-model review, 2026-10-12).
+  path was copied (caught by a second, independent review).
 - **Know who answered an external probe.** Check `server`, `WWW-Authenticate` and similar
   headers, and probe a path that does not exist as a control. A 401 from an auth proxy in front
   of the app says nothing about the app.
@@ -199,6 +199,5 @@ right but wrong together. This skill is the order of work that catches those bef
 
 ## Maintaining this skill
 
-Every rule here came from a recorded incident; the incidents and their dates are kept outside
-this directory, in the author's wiki. Add a rule only with its incident, and state the condition
-under which it applies.
+Every rule here came from an observed incident. Add a rule only with the incident it prevents, and
+state the condition under which it applies.

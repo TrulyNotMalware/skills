@@ -17,11 +17,15 @@ PRIVATE_ANYWHERE = [
     (re.escape(os.path.expanduser("~")) + r"(?![\w.-])", "home directory path"),
     (r"[A-Za-z0-9._%+-]+@(?!example\.)[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "e-mail address"),
 ]
-# Never in a skill, which states general practice: paths and tools of the author's machine.
+# Never in a skill, which states general practice: paths and tools of the author's machine, skills that
+# live only on it, and dated incident notes (keep the mechanism and the numbers, drop the date and the
+# project; the "Verified <date>" line under the version table is not a note).
 PRIVATE_IN_SKILLS = PRIVATE_ANYWHERE + [
     (r"~/workspace\b", "path on the author's machine"),
     (r"~/infra\b", "path on the author's machine"),
-    (r"llm_wiki", "the author's wiki"),
+    (r"llm_wiki|author's wiki", "the author's wiki"),
+    (r"\b(dependency-bump|local-infra|wiki-guard|infra-pane|infra-preflight)\b", "a skill or mod bound to the author's machine"),
+    (r"\((?:observed |measured |caught [^)]*?, )?20\d\d-\d\d-\d\d\b|,\s*(?:observed |measured )?20\d\d-\d\d-\d\d\s*[).;]", "dated incident note"),
 ]
 MOD_SOURCE_SUFFIXES = (".ts", ".tsx", ".json", ".md")
 

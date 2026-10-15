@@ -158,4 +158,4 @@ When bumping versions: update the table above, re-run the tool matrices in
 `reference/versions-tools.md` first (vet's analyzers, the `go test` subset, `go tool fix help`,
 golangci-lint defaults), then grep for `go ≥`, `main go ≥`, `toolchain ≥`, `1.27`, `1.28`,
 `GODEBUG`, `GOEXPERIMENT`, `SA`, `golangci`, `gopls`, `go fix` and `x/sync` and re-run each tagged
-statement. The change history is kept outside this directory, in the author's wiki.
+statement.

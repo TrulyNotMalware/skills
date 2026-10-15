@@ -216,8 +216,8 @@ saved.captured.status shouldBe OrderStatus.SUBMITTED        // assert the observ
   whatever was published, and `every { publisher.publishEvent(any()) } throws ...` never fires.
   Write `publishEvent(any<Any>())`, or `publishEvent(ofType<OrderPlaced>())` when the type
   matters. The same applies to any Java API with an `Object` overload next to a narrower one.
-  (Measured: twelve `exactly = 0` assertions in one Kotlin service had passed against the wrong
-  overload; they surfaced only when a new event type was added next to them, 2026-10-13.)
+  (Measured: twelve `exactly = 0` assertions had passed against the wrong overload; they surfaced
+  only when a new event type was added next to them.)
 - Assert outcomes (returned values, captured arguments, state) rather than only interactions. A
   test that only checks `verify { }` proves the code calls something, not that the result is right.
 - Kotlin `object`s and top-level functions need `mockkObject`/`mockkStatic`, which are JVM-global.
@@ -348,10 +348,10 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
 - **A transaction guard needs a caller-side spec with a real transaction manager.** A mocked manager
   never sets `TransactionSynchronizationManager.isActualTransactionActive()`, so a `check(…)` that
   refuses (or requires) an active transaction in a repository method is invisible to the mocked-manager
-  spec of its caller. Observed 2026-10-08 (Boot 4.1.1): a guard added to a repository's CAS methods
+  spec of its caller. Observed on Boot 4.1.1: a guard added to a repository's compare-and-set methods
   would have thrown in production from a service that called one inside the same `TransactionTemplate`
-  as its notification write; the unit spec stayed green, a `DataSourceTransactionManager` over H2 failed
-  at once. Drive the guarded call through the real caller with a real manager, and check that the spec
+  as another write; the unit spec stayed green, a `DataSourceTransactionManager` over H2 failed at
+  once. Drive the guarded call through the real caller with a real manager, and check that the spec
   fails with the guard removed.
 - **`@TransactionalEventListener` in a hand-built `AnnotationConfigApplicationContext`** (no
   `@EnableTransactionManagement`) runs as a plain `@EventListener`: immediately, inside the

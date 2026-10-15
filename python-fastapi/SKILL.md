@@ -188,5 +188,4 @@ When bumping the target versions: update the table above, then grep this directo
 (`FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `pytest-asyncio`,
 `PyJWT`, `bcrypt`, `httpx2`, `aiokafka`, `redis 8`, `arq`, `ruff 0.`, `uvicorn 0.`, `fastapi-cli`,
 `uv 0.`, `Alembic`, `alembic`, `tenacity`, `SQLModel`, `sqlmodel`, `asyncer`) and re-verify
-each tagged statement by running it. The change history is kept outside this directory, in the
-author's wiki.
+each tagged statement by running it.

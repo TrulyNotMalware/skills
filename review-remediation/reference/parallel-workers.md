@@ -25,7 +25,7 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
   before the worker reached its revert loop; the worker moved to a scratch copy on its own, so
   nothing broke, but the brief had been false since the lanes started and the worker had no way
   to know. Put the copy procedure (below) in the brief, and if you start any reader after
-  briefing, tell the worker. (2026-10-13, a Kotlin service; the move is in the worker's report.)
+  briefing, tell the worker.
 
 ## While they run
 
@@ -44,8 +44,8 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
   that `git diff` omits untracked new files — append them with `git diff --no-index /dev/null <file>` or the
   worktree silently lacks them. Run the revert-and-test loop there one Gradle run at a time, record
   `git diff --stat` before the first revert and compare after every restore, and remove the worktree when
-  done: it is stale from the next edit in the main tree. (2026-10-11, a pull request on a Kotlin service: six
-  behavioural fixes verified this way while a code-reviewer lane read the main tree and Codex reviewed it.)
+  done: it is stale from the next edit in the main tree. (Six behavioural fixes on one pull request were
+  verified this way while a code-review lane read the main tree.)
 - **The same holds for one agent, and for a tree that is not a repository.** Anything that reads the tree
   while a fix is reverted is a concurrent reader. In the incident a background `test && build` chain started
   next to an in-place revert loop reported the reverted file as a failing test and went on to build an image;
@@ -53,9 +53,9 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
   loop there: `rsync -a --exclude .venv --exclude __pycache__ --exclude .env <tree>/ <copy>/`, then run the
   tests from `<copy>` with the original interpreter. Leave secrets files out of the copy, and first confirm
   that the tests import the copy: with an editable install a plain `import` resolved to the original tree,
-  and only the test runner's own path setting (pytest `pythonpath`) put the copy first. (2026-10-12, a Python
-  service outside version control; the copy procedure was run once: a revert in the copy failed its test
-  there while the original file stayed byte-identical.)
+  and only the test runner's own path setting (pytest `pythonpath`) put the copy first. (On a Python service
+  outside version control the copy procedure was run once: a revert in the copy failed its test there while
+  the original file stayed byte-identical.)
 - **An in-place revert loop also poisons bytecode caches (Python).** CPython validates a `.pyc` by the
   source's mtime in whole seconds and its size. Restore a file of the same size within the same second as
   the reverted write, and the next run still executes the reverted code. The mirror case: a revert written
@@ -75,8 +75,8 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
   file path back, and ask for "problems only, short, most important first". Keep results in the
   repository, an artifacts directory or notes rather than only under `/tmp`: a reboot once erased
   the scratch results and the unread rest of truncated reports.
-  Put the file request in the brief, before the first report: in one session four reports were
-  truncated before the coordinator switched to files (2026-10-12).
+  Put the file request in the brief, before the first report: in one run four reports were
+  truncated before the coordinator switched to files.
 - **Screen patches before applying them.** `git apply --numstat <patch>` lists the files a patch
   touches without applying it; reject anything outside the worker's ownership. Conflicts land in
   shared documents (`AGENTS.md`, changelogs); merge those by hand.
