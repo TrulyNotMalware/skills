@@ -134,9 +134,16 @@ key: wrong `aud`, wrong `iss`, and a missing `aud` are all rejected (401).
 - **Several issuers (multi-tenant):** never build a decoder from whatever `iss` the token claims. Keep
   an allowlist of issuers (`JwtIssuerAuthenticationManagerResolver` with explicit issuers), validate
   audience per issuer, and identify users by `(iss, sub)`, not `sub` alone. `fromTrustedIssuers(...)`
-  builds each decoder from issuer metadata, OIDC discovery or RFC 8414
-  (`JwtDecoders.fromIssuerLocation`, Security 7.1, from source); for issuers that publish only a JWK
-  set, pass your own issuer-to-manager lookup to the constructor (the reactive form is in [webflux-gateway](webflux-gateway.md#reactive-security-defaults-and-jwt)).
+  builds each decoder with `JwtDecoders.fromIssuerLocation`, which needs issuer metadata, OIDC
+  discovery or RFC 8414 (it tries `{issuer}/.well-known/openid-configuration`, then two host-relative
+  well-known paths; Security 7.1). A JWK-set-only issuer throws `IllegalArgumentException` out of the
+  filter chain on every request, and every token repeats the discovery requests (all three when each
+  path answers 404; a 5xx or a connection failure ends the lookup at that path), because only a
+  successful lookup is cached. The client sees 401 with a bare `Bearer` challenge when `/error`
+  requires authentication (the error dispatch is anonymous), or 500 when `/error` is permitted, never
+  `invalid_token`. For issuers that publish only a JWK set, pass your own issuer-to-manager lookup to
+  the constructor (the reactive form is in [webflux-gateway](webflux-gateway.md#reactive-security-defaults-and-jwt)).
+  An issuer outside the list gets 401 `invalid_token` without a network call.
 - **Authorities mapping:** by default the `scope`/`scp` claim becomes `SCOPE_<value>` authorities.
   Roles in other claims (Keycloak `realm_access.roles`, Auth0 custom namespaces, Entra `roles`) are
   **ignored** until you map them with a `JwtAuthenticationConverter`. `hasRole("ADMIN")` checks for
@@ -361,6 +368,7 @@ mockMvc.get("/api/orders/1") {
 - Agent adds `permitAll` for `OPTIONS` instead of configuring CORS - preflight gets no CORS headers.
 - Agent copies an `AuthorizationManager.check(...)` override - Security 7 only has `authorize(...)`.
 - Agent builds a JWT decoder from the token's own `iss` - allowlist issuers.
+- Agent uses `fromTrustedIssuers` with a JWK-set-only issuer - every token repeats discovery and ends in `IllegalArgumentException` (401 with a bare challenge, or 500 when `/error` is permitted); pass your own lookup to the constructor.
 - Agent annotates a security filter with `@Component` and also adds it to the chain - registered twice (plain `Filter` runs twice; `OncePerRequestFilter` may run at the wrong position).
 - Agent tests only the happy path with `jwt()` - add 401/403 cases and test the decoder separately.
 
