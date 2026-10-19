@@ -100,6 +100,13 @@ def test_pay_prints_nothing(
   0.16). Check afterwards with `mock.assert_not_called()` or `mock.call_count == 0`, which read the
   recorded calls.
 
+- `create_autospec(...)` is typed as returning `Any` (typeshed), so returning it straight from an
+  annotated fixture or helper (`-> MagicMock`, `-> NonCallableMagicMock`, `-> PaymentClient`) is
+  mypy `no-any-return` under `strict` (mypy 2.3). Bind it to an annotated local first
+  (`mock: MagicMock = create_autospec(PaymentClient, instance=True)` and `return mock`) or `cast`
+  it. `MagicMock(spec=PaymentClient)` is typed `MagicMock` and passes as is, but checks only
+  attribute names, not call signatures.
+
 ## Floats
 
 - `pytest.approx(expected)` accepts a difference up to the larger of `rel=1e-6` times the
@@ -129,14 +136,30 @@ package installed from a wheel and the source edited afterwards (pytest 9.1):
   `--import-mode=importlib`, which popular guides suggest for this, does not keep the source tree
   out on its own. Run the `pytest` command, or use a `src/` layout without `pythonpath`.
 
+- Importing from `conftest.py` (`from tests.conftest import PASSWORD`) in a `tests/` directory
+  without `__init__.py` imports the file twice under the default `--import-mode=prepend` (and
+  `append`): pytest loads it as the top-level module `conftest` (its directory goes on
+  `sys.path`), and the import creates a second module `tests.conftest` from the same file once the
+  repository root is importable (`pythonpath = ["."]`, `python -m pytest`). The tests pass
+  (pytest 9.1; fixtures come from the copy pytest loaded); `--import-mode=importlib` and
+  `consider_namespace_packages = true` load it once. mypy trips over the same layout on its own:
+  checking `tests` as a directory without `explicit_package_bases`, it finds any module that
+  another file imports as `tests.x` under two names (`x` and `tests.x`, `conftest` or a helper
+  module alike), stops at `Source file found twice under different module names` and checks
+  nothing else (mypy 2.3); a single-file target passes. `tests/__init__.py` fixes both (with the
+  package at the repository root, `pytest` then imports the source tree, table above);
+  `explicit_package_bases = true` fixes mypy only.
+
 ## Gotchas
 
 - Agent patches `sys.stdout` or `sys.stderr` in a fixture - pytest's capture undoes it before the test runs; an assertion that nothing was printed passes with the bug present.
 - Agent builds the object under test in `setup_method` or a fixture and patches the dependency it stores at construction with `@patch` on the test - the object keeps the real dependency, and a test that does not assert on the mock passes.
 - Agent calls `reset_mock()` between cases - the previous case's `return_value` and `side_effect` remain.
+- Agent returns `create_autospec(...)` straight from a fixture annotated `-> MagicMock` - mypy `no-any-return` under `strict`; bind it to an annotated local or `cast` it.
 - Agent relies on `side_effect=AssertionError` to prove a mock is never called - a broad `except` in the code under test swallows it; use `assert_not_called()`.
 - Agent compares a tiny float with `pytest.approx(expected)` - a result that underflowed to `0.0` passes.
 - Agent runs `python -m pytest`, or adds `tests/__init__.py`, to test the installed package - with the package at the repository root the source tree is imported instead.
+- Agent imports from `tests/conftest.py` (`from tests.conftest import X`) in a `tests/` directory without `__init__.py` - under the default import mode pytest imports the file twice (`conftest` and `tests.conftest`) and the tests pass; `mypy tests` stops at `Source file found twice` for any `tests.x` import; add `tests/__init__.py`.
 - Agent guards an assertion with `if path.exists():` - the test passes when nothing was written.
 
 ## Official sources

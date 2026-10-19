@@ -24,7 +24,7 @@ the matching reference before writing or reviewing code in that area.
 
 ## Target versions
 
-Verified 2026-10-01 by running code on these versions, extended 2026-10-13 and 2026-10-14.
+Verified 2026-10-01 by running code on these versions, extended 2026-10-13, 2026-10-14 and 2026-10-19.
 Version-bound statements are tagged `(Python 3.14)`, `(ruff 0.16)`, `(mypy 2.3)`, `(pytest 9.1)`,
 `(ty 0.0.86)` or `(pyright 1.1.414)`.
 
