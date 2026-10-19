@@ -138,8 +138,14 @@ override fun filter(exchange: ServerWebExchange, chain: GatewayFilterChain): Mon
   body is never written, and neither the compiler nor the log warns.
 - A bare `mono { }` starts on `Dispatchers.Default`, so the body and the rest of the chain run on that
   pool. (With Spring Security in front and its default session-backed request cache, gateway filters
-  already run on Reactor's `parallel` threads rather than the Netty event loop: the switch happens
-  inside the security chain and disappears with a no-op request cache.)
+  already run on Reactor's `parallel` threads rather than the Netty event loop, also in a bearer-token
+  `oauth2ResourceServer` chain: the request cache's `getSession()` creates an in-memory session,
+  which continues on `parallel` (measured without a session cookie, which a stateless gateway never
+  sets; retrieving an existing session does not switch). A no-op request cache removes that switch,
+  and a bearer or `permitAll` chain then stays on the event loop; with HTTP Basic the password check
+  (`UserDetailsRepositoryReactiveAuthenticationManager`, default scheduler) has already moved the
+  request to `boundedElastic`, and it stays there. A missing-token 401 still commences on `parallel`
+  unless the security context repository is `NoOpServerSecurityContextRepository` too.)
   `mono(Dispatchers.Unconfined) { }` stays on the calling thread (Spring runs suspend handler methods
   the same way); use it only when the body never blocks
   ([coroutines](coroutines.md#dispatchers-and-blocking-code)).
@@ -233,8 +239,46 @@ fun securityWebFilterChain(http: ServerHttpSecurity, globalCors: GlobalCorsPrope
   permitted. A disallowed origin is rejected with 403 before authentication.
 - Only the global configurations are copied, at startup. Per-route `cors` metadata is not: where a
   global pattern such as `/**` also covers the route, the security chain rejects an origin that only
-  the route allows with 403 (other pattern layouts not run). A refresh that changes `globalcors` is not
-  reflected either (follows from the copy at startup; not run).
+  the route allows with 403 (other pattern layouts not run). A refresh that changes `globalcors`
+  (`POST /actuator/refresh` with Spring Cloud Context) is not reflected either: the gateway's own CORS
+  picks it up on the next route refresh, but the security chain still holds the startup copy and
+  answers first, so the old origin keeps passing (routed 200, 401, preflight) and the new one gets 403
+  (measured for a changed `allowed-origins` value; adding or removing a pattern key not run).
+
+If origins change at runtime, give the chain a source that copies again on `RefreshRoutesResultEvent`
+(the gateway publishes it after a config refresh too):
+
+```kotlin
+/** Copies `globalcors` again whenever the gateway refreshes its routes (a config refresh does that too). */
+class GlobalCorsSource(private val globalCors: GlobalCorsProperties) :
+    CorsConfigurationSource, ApplicationListener<RefreshRoutesResultEvent> {
+    @Volatile private var delegate = copy()
+
+    private fun copy() = UrlBasedCorsConfigurationSource().apply { setCorsConfigurations(globalCors.corsConfigurations) }
+
+    override fun getCorsConfiguration(exchange: ServerWebExchange): CorsConfiguration? =
+        delegate.getCorsConfiguration(exchange)
+
+    override fun onApplicationEvent(event: RefreshRoutesResultEvent) {
+        delegate = copy()
+    }
+}
+
+@Bean
+fun globalCorsSource(globalCors: GlobalCorsProperties): GlobalCorsSource = GlobalCorsSource(globalCors)
+
+@Bean
+fun securityWebFilterChain(http: ServerHttpSecurity, corsSource: GlobalCorsSource): SecurityWebFilterChain =
+    http {
+        cors { configurationSource = corsSource }
+        authorizeExchange { authorize(anyExchange, authenticated) }
+        oauth2ResourceServer { jwt { } }
+    }
+```
+
+Imports: `org.springframework.cloud.gateway.event.RefreshRoutesResultEvent`,
+`org.springframework.web.cors.reactive.CorsConfigurationSource` and `UrlBasedCorsConfigurationSource`,
+`org.springframework.web.cors.CorsConfiguration`. Per-route `cors` metadata is still not copied.
 
 ## Reactive security defaults and JWT
 
@@ -396,6 +440,8 @@ class GatewayChainSpec : BehaviorSpec() {
 - Agent's fallback calls `chain.filter` again from `catch (e: Exception)` - backend connection errors and timeouts re-run the chain (an HTTP 5xx answer does not), and cancellation is caught too.
 - Agent compares `pathWithinApplication().value()` with a configured path - percent-encoded variants pass the matchers and reach the backend but skip the check.
 - Agent configures `globalcors` and expects CORS on Security's 401 - stage 1 responses never reach the gateway's CORS handling; add `cors { }` to the security chain.
+- Agent copies `globalcors` into the security chain and later changes the origins with `/actuator/refresh` - the gateway refreshes, the chain keeps the startup copy and answers first; copy again on `RefreshRoutesResultEvent`.
+- Agent switches to `NoOpServerRequestCache` to keep gateway filters on the event loop under HTTP Basic - the default password check has already moved the request to `boundedElastic`; it works for bearer and `permitAll` chains.
 - Agent imports `org.springframework.security.config.annotation.web.invoke` in a WebFlux app - that is the servlet DSL; use `org.springframework.security.config.web.server.invoke`.
 - Agent uses `fromTrustedIssuers` with JWK-set-only issuers - it requires OIDC discovery or RFC 8414 metadata; build the managers with the constructor.
 - Agent puts `@Order` on the `@Bean` method of a lambda `GlobalFilter` - the gateway ignores it and runs the filter last, just before routing.
