@@ -95,6 +95,12 @@ right but wrong together. This skill is the order of work that catches those bef
   reclaims the same row, so the id never changes and the deduplication advice written from the
   finding was wrong. The finding was right about the risk and wrong about the path, and the
   path was copied (caught by a second, independent review).
+- **Check user-facing text that a plan or a fix introduces against what the product lets the user do,
+  and against the module's own wording rules, before a worker gets it as an exact string.** A plan told
+  users to "ask me here" in the bot's direct message, which the production manifest keeps read-only, and
+  named the transport inside a transport-neutral domain; the worker followed the strings and rewrote the
+  documented rule to fit them. Both reached the review lanes untouched. A worker reporting that it changed a
+  rule sentence to match a brief is the signal to re-read the brief.
 - **Know who answered an external probe.** Check `server`, `WWW-Authenticate` and similar
   headers, and probe a path that does not exist as a control. A 401 from an auth proxy in front
   of the app says nothing about the app.
