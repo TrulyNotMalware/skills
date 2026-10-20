@@ -345,6 +345,13 @@ entity is the aggregate; do not introduce a second model into a project that doe
   in one transaction on the managed entity. Setting the old version on a re-read **managed** entity does
   not help: Hibernate checks the version it loaded. A bulk `update` query skips the version entirely
   ([bulk updates](#bulk-updates-and-versioning)).
+- **A derived `deleteBy…` is not guarded by the version you loaded.** Spring Data runs the query again and
+  removes whatever it returns (Spring Data JPA 4.1). Under READ COMMITTED a row that another transaction
+  deleted and re-inserted under a new primary key between your read and the delete is loaded fresh, passes
+  its own version check and is removed; only the same-key rewrite is caught, and only because the first-level
+  cache hands back the stale managed instance. Remove the managed entity you loaded, or compare a column the
+  caller observed (a ciphertext, a token, a timestamp) before `delete(entity)` and fail on a mismatch. Pin it
+  with two committed transactions: read, then delete-and-reinsert on the other thread, then delete.
 - Map inside the transaction. Mapping that walks lazy associations after the transaction ends fails
   with `LazyInitializationException`, or only works while a `join fetch` happens to be present.
 - One mapping per direction, tested per direction. Two mappers for the same type (to domain, to a DTO)
@@ -402,3 +409,4 @@ Migration tools (Flyway, Liquibase) are out of scope here; these rules hold with
 - Agent maps a stored row back through the domain's creation constructor - creation-time checks reject old data.
 - Agent saves a domain object by re-reading the row and copying fields onto it - the fresh version is checked and a concurrent change is overwritten.
 - Agent writes enum values as string literals in native SQL - a rename compiles and the query silently matches nothing.
+- Agent deletes through a derived `deleteBy…` after reading the row - under READ COMMITTED a delete-and-reinsert in between is removed with its fresh version instead of being rejected.

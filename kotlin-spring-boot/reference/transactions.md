@@ -99,6 +99,14 @@ Check which approach the project already uses before adding a new one.
   The outer commit then throws `UnexpectedRollbackException`.
 - Never use `noRollbackFor` to survive an optimistic-lock failure. The persistence context is no
   longer usable; retry the whole unit in a new transaction.
+- When the callback throws and the **rollback itself fails**, `TransactionTemplate.rollbackOnException`
+  throws the rollback failure instead of the original (Framework 7.0.9). A `TransactionSystemException`
+  still carries the original as `applicationException`, but `JpaTransactionManager.doRollback` first asks
+  the JPA dialect, which turns a `PersistenceException` into a `DataAccessException` that only *logs* the
+  original ("Application exception overridden by rollback exception"). A wrapper that turns exceptions
+  into results must record the original in the callback and rethrow it when `execute` fails, or an
+  `Error` from the action ends as a logged `Result.failure`. See
+  [programmatic transactions](#programmatic-transactions) for the shape.
 
 ## Propagation
 
@@ -151,6 +159,13 @@ class OrderStatusFacade(private val orderService: OrderService) {
 - Programmatic `RetryTemplate` (Framework 7) wraps the failure in `RetryException` when retries end,
   including exceptions that were never retryable. Inspect `cause` (or the suppressed exceptions)
   instead of catching the original type around `execute`.
+- `RetryPolicy.Builder.includes(...)` and `excludes(...)` are matched against the **whole cause chain**
+  (`ExceptionTypeFilter.match(throwable, true)`, Framework 7.0.9). `includes(Exception::class.java)` therefore
+  also retries an `Error` whose cause is an `Exception` (`ExceptionInInitializerError`, a `LinkageError`
+  built with a cause). Add `excludes(Error::class.java)` when an `Error` must never be retried; it then
+  comes back after one attempt as `RetryException` with the `Error` as `cause`, and the earlier attempts
+  sit as suppressed exceptions on the `RetryException`, lost unless the facade copies them onto what it
+  rethrows. Narrowing the parameter type to `Class<out Exception>` does not cover this case.
 - Retry only idempotent units. A unit that also sent an HTTP request or a message will send it again.
 - Cap contention on hot paths with `@ConcurrencyLimit` (same package) instead of retry storms.
 
@@ -229,6 +244,40 @@ transactionTemplate.executeWithoutResult { orderRepository.deleteById(id) }
   compiler flags (Kotlin 2.4.10, seen as a warning in a `--rerun-tasks` build). A lambda that returns
   `T?` gives `T?`. On Framework 6 `execute` was `@Nullable` for every callback and `!!` was the norm, so
   copy the call shape from a project file compiled against the current version, not from older examples.
+- A `Result`-returning wrapper around `execute` has to survive three paths: an `Exception` from the
+  action (roll back, return a failure), an interrupt (restore the flag first), and an `Error`, which must
+  propagate even when the rollback that follows it throws (see [rollback rules](#rollback-rules)):
+
+  ```kotlin
+  inline fun <T> TransactionTemplate.runInTx(crossinline action: () -> T): Result<T> {
+      var escaped: Error? = null
+      return try {
+          execute<Result<T>> { status ->
+              try {
+                  Result.success(action())
+              } catch (interrupted: InterruptedException) {
+                  Thread.currentThread().interrupt()
+                  status.setRollbackOnly()
+                  Result.failure(interrupted)
+              } catch (exception: Exception) {
+                  status.setRollbackOnly()
+                  Result.failure(exception)
+              } catch (error: Error) {
+                  escaped = error
+                  throw error
+              }
+          }
+      } catch (rollbackFailure: Exception) {
+          val original = escaped ?: return Result.failure(rollbackFailure)
+          original.addSuppressed(rollbackFailure)
+          throw original
+      }
+  }
+  ```
+
+  Pin it with a mocked `PlatformTransactionManager` whose `rollback` throws, once with
+  `TransactionSystemException` and once with a plain runtime exception: the action's `Error` must be the
+  one that propagates, with the rollback failure as its suppressed exception.
 
 ## Coroutines
 
@@ -284,6 +333,10 @@ Transaction behavior is invisible to unit tests that construct the service direc
   non-null for a non-null lambda; the compiler warns and readers look for a null path that does not exist.
 - Agent asserts after-commit behaviour of a `@TransactionalEventListener` in a hand-built context
   without `TransactionalEventListenerFactory` - it ran as a plain listener inside the transaction.
+- Agent turns every exception from `TransactionTemplate.execute` into a result - when the rollback itself
+  fails, the wrapper sees the rollback failure and the action's exception (even an `Error`) is only logged.
+- Agent retries with `includes(Exception::class.java)` and expects an `Error` to stop the retry - the policy
+  matches the cause chain, so an `Error` with an `Exception` cause is retried.
 
 ## Official sources
 

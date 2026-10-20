@@ -146,6 +146,10 @@ These are the Kotlin-specific failures that compile fine and pass unit tests.
 - In a WebFlux/gateway filter, agent subscribes to `chain.filter(...)` twice (`switchIfEmpty`, a `catch`
   fallback) or wraps it in a pre-check's `withTimeout` - the remaining filters run twice, and slow
   backends get a 500 or an empty 200 ([webflux-gateway](reference/webflux-gateway.md)).
+- Agent lets an `Error` out of a `@KafkaListener`, or retries with `includes(Exception::class.java)` and
+  expects an `Error` to stop the retry - the consumer stops without reaching the error handler, and the
+  retry policy matches the cause chain ([messaging-outbox](reference/messaging-outbox.md),
+  [transactions](reference/transactions.md#optimistic-locking-and-retry)).
 
 ## Maintaining this skill
 

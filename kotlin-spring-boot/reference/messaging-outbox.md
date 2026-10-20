@@ -142,6 +142,16 @@ fun kafkaErrorHandler(template: KafkaTemplate<Any, Any>) =
   template).
 - Dead-lettering breaks ordering for that key. Document how records are replayed from the DLT, and
   make replay an explicit, audited operation.
+- **An `Error` thrown out of a `@KafkaListener` never reaches the error handler** (spring-kafka 4.1.1).
+  The record-listener path catches `RuntimeException` only; the consumer loop catches the `Error`, logs
+  "Stopping container due to an Error", stops that consumer and nothing restarts it. Its offset is not
+  committed, so a deterministic `Error` while reading the record stops the container again after every
+  restart. When one record must not stop delivery, translate at the listener boundary and nowhere else:
+  log the `Error` with the record coordinates (partition, offset, key), rethrow it wrapped in a dedicated
+  `RuntimeException`, and register that type as not retryable (and in any poison-record list) so it goes
+  straight to the dead-letter topic. Pin it with a real `KafkaMessageListenerContainer` over a
+  `MockConsumer`: the container must still be running and the next record processed. If you do not
+  translate, alert on `ConsumerStoppedEvent` with `reason == ERROR`.
 
 ## Transactional outbox
 
@@ -298,6 +308,7 @@ Custom relay rules:
 - Agent forgets CDC tombstones and the relay's own update events - skip `null` values and non-`PENDING` after-images.
 - Agent puts `@Async` on a `BEFORE_COMMIT` staging listener, or stages with a plain `@EventListener` under an async multicaster - the row is written outside the publisher's transaction, or not at all.
 - Agent claims a batch and trusts the affected-row count - select the claimed rows by a claim token.
+- Agent lets an `Error` escape a `@KafkaListener` - the error handler never sees it; that consumer stops, nothing restarts it, and an `Error` thrown while parsing the record repeats after every restart.
 
 ## Official sources
 
