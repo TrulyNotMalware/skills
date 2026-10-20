@@ -147,6 +147,9 @@ says which tool, if any, reports the problem.
 - Agent writes `val ms: Long = 30 * 24 * 60 * 60 * 1000` - the `Int` product overflows first.
 - Agent compares `BigDecimal`s with `==` - `1.0` and `1.00` are not equal.
 - Agent passes two arguments of the same type positionally - swapped values compile.
+- Agent handles an `InterruptedException` as an ordinary failure in `catch (e: Exception)` or `runCatching` -
+  the flag is already cleared, so a later `isInterrupted` check never fires. See
+  [classes-errors](reference/classes-errors.md#exceptions).
 
 ## Maintaining this skill
 

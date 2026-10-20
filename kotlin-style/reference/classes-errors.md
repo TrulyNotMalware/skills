@@ -142,7 +142,18 @@ data class Credentials(val user: String, val password: String) {
   positive). detekt 1.23.8 has the rule but missed both cases on Kotlin 2.4 code. Structured
   concurrency and dispatchers are covered by the coroutines reference of the kotlin-spring-boot
   skill.
-- Never catch `Throwable` or `Error`. Close resources with `use { }`.
+- **`catch (e: Exception)` and `runCatching` also catch `InterruptedException`**, and by then the throw has
+  already cleared the thread's interrupt flag. Blocking code that treats it as an ordinary failure keeps
+  running, and a later `Thread.currentThread().isInterrupted` check in the same loop never fires. Rethrow
+  it, or call `Thread.currentThread().interrupt()` before handling it as a failure. Inside a Spring
+  `TransactionTemplate` callback a rethrown checked exception comes back as `UndeclaredThrowableException`
+  (Framework 7), so restore the flag there and return a failure instead. detekt's
+  `TooGenericExceptionCaught` flags the broad `catch`, not the lost interrupt.
+- Never catch `Throwable` or `Error`. Close resources with `use { }`. Two shapes are the exceptions: catch an
+  `Error` only to log or record it and rethrow the same instance, or translate it at a framework boundary
+  that would otherwise stop a whole consumer on it (the Kafka listener case in the kotlin-spring-boot
+  skill's messaging reference). An `Error` that becomes a `Result.failure`, a `FAILED` status or a retry
+  disguises a broken JVM as one failed item.
 
 ## Tooling
 
@@ -201,6 +212,7 @@ kotlin {
 - Agent expects an extension to dispatch on the runtime type - it dispatches on the declared type.
 - Agent leaves `TODO()` reachable - `NotImplementedError` escapes `catch (e: Exception)`.
 - Agent wraps a call in `runCatching` - it also catches `Error`s and coroutine cancellation.
+- Agent swallows an `InterruptedException` in `catch (e: Exception)` or `runCatching` - the flag is already cleared, so the loop's later `isInterrupted` check never fires and the work runs on.
 - Agent catches `Exception` (or `IllegalStateException`) around suspending calls - cancellation is swallowed at every suspension point.
 - Agent judges warnings from a build that also has compile errors - the warnings are not printed.
 - Agent trusts detekt 1.23.8 with type resolution on Kotlin 2.4 code - it silently misses findings.
