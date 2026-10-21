@@ -212,6 +212,17 @@ effect is wanted.
   reports both, with type resolution only. String templates (`"$value"`) are
   locale-independent.
 
+- **`isBlank()` and a `\R` line split disagree on NEL.** `isBlank()` is built on
+  `Char.isWhitespace()`, which accepts U+2028/U+2029 but not NEL (U+0085, category Cc), while
+  `Regex("\\R")` splits on all three. A text that is only NEL passes an `isBlank()` gate and then
+  renders as empty lines through a `\R` split. `lines()` and `BufferedReader.lines()` split only
+  on CR and LF, so they disagree with `\R` as well. When a gate and a renderer must agree, derive
+  the blank check from the renderer's split:
+  `fun String.splitLineBreaks(): List<String> = split(Regex("\\R"))` and
+  `fun String.isBlankAcrossLineBreaks(): Boolean = splitLineBreaks().all { it.isBlank() }`.
+  Format characters (Cf: zero-width space, BOM) are blank for neither; handle them separately if
+  they matter. **Nothing** reports it.
+
 ## Gotchas
 
 - Agent exposes a mutable backing list as `List` - callers can cast it and mutate the owner.
@@ -232,6 +243,7 @@ effect is wanted.
 - Agent compares `BigDecimal` with `==` - scale-sensitive; `1.0 != 1.00`.
 - Agent converts a `Char` digit with `toInt()` - gets the character code.
 - Agent formats a number with `"%.2f".format(x)` for a file or API - a comma decimal separator under some locales.
+- Agent gates user text with `isBlank()` and renders it with a `\R` split - a NEL-only text passes the gate and renders as empty lines.
 
 ## Official sources
 
