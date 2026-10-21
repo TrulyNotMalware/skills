@@ -199,6 +199,23 @@ class WiringSmokeTest
 
 Keep these specs few: each distinct configuration starts another context.
 
+`ApplicationContextRunner` is the cheaper check for a conditional bean, but it proves only what it is
+given. `withUserConfiguration(Job::class.java)` registers the class whether or not it carries
+`@Component` and still evaluates its `@Conditional`, so the spec pins the condition, not the
+discovery: removing the stereotype can leave both the "present when enabled" and "absent when
+disabled" cases green while a stereotype-based scan in production no longer finds the job. A scan
+inside the test has the same blind spot whenever something else admits the class. An include filter
+`ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = [Job::class])` registers it
+without the stereotype, with or without `useDefaultFilters` (include filters are alternatives to the
+stereotype filter, not extra conditions), and so do `@Import(Job::class)`, `withBean`, and a `@Bean`
+method for the same type. To prove discovery, run a default-filter scan from the production base
+package with no extra include filter and no other registration of the job; even that does not
+reproduce Boot's `TypeExcludeFilter` or the application's own exclude filters. The cheaper
+`MergedAnnotations.from(Job::class.java).isPresent(Component::class.java)` guards only against the
+stereotype being removed, not against scan-range or exclude changes
+(`isAnnotationPresent(Component::class.java)` is false for `@Service` and other meta-annotated
+stereotypes).
+
 ## MockK
 
 ```kotlin
@@ -471,6 +488,9 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
   `ApplicationEvent` overload, production publishes through the `Object` overload, and the check
   passes whatever was published. Use `any<Any>()` or `ofType<Event>()`.
 - Agent relies on unit tests for a wiring change - add or extend a context-starting smoke test that asserts the chosen beans.
+- Agent pins a conditional `@Component` by listing it in `ApplicationContextRunner.withUserConfiguration` - the
+  runner registers it with or without the stereotype. Discovery needs a default-filter scan that nothing else
+  (include filter, `@Import`, `withBean`) admits the class to; a `MergedAnnotations` stereotype check only guards its removal.
 - Agent trusts a green run after moving tests - an empty spec passes as one entry; read the test names, not only the count.
 - Agent asserts that a collection contains an element - truncation passes; assert the size.
 - Agent adds a `@SpringBootTest` to an app with `@Scheduled` jobs without gating scheduling - the
