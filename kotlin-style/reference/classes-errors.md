@@ -198,6 +198,17 @@ kotlin {
   ktlint 1.8 rejects the file ("Not a valid Kotlin file"), and detekt 2.0 parses it.
 - ktlint enforces formatting from `.editorconfig`. Do not hand-format against it; run its format
   task. Suppress a rule in `.editorconfig`, not with scattered `@Suppress`.
+- **ktlint `function-signature` picks one line or one parameter per line by code style.** With
+  `ktlint_official`, a signature with two or more parameters must be multiline even when it fits;
+  on one line it fails with "Newline expected after opening parenthesis". Only a one-parameter
+  signature that fits is folded. With `intellij_idea` or `android_studio` and `max_line_length`
+  set, every signature that fits must stay on one line, and parameters wrapped one per line fail
+  with "No whitespace expected between opening parenthesis and first parameter name". Without
+  `max_line_length` those two styles leave the layout alone.
+  `ktlint_function_signature_rule_force_multiline_when_parameter_count_greater_or_equal_than`
+  moves the threshold. `ktlint_official` behaves as if it were 2, and the other styles force no
+  count (ktlint 1.8; 1.5 gave the same results). Let the format task choose the wrapping instead
+  of copying the layout from a project with another code style.
 
 ## Gotchas
 
@@ -216,6 +227,7 @@ kotlin {
 - Agent catches `Exception` (or `IllegalStateException`) around suspending calls - cancellation is swallowed at every suspension point.
 - Agent judges warnings from a build that also has compile errors - the warnings are not printed.
 - Agent trusts detekt 1.23.8 with type resolution on Kotlin 2.4 code - it silently misses findings.
+- Agent wraps function signatures by hand in the layout of another project - `ktlint_official` wants two or more parameters one per line, `intellij_idea` folds every signature that fits.
 
 ## Official sources
 
