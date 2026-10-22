@@ -212,16 +212,23 @@ effect is wanted.
   reports both, with type resolution only. String templates (`"$value"`) are
   locale-independent.
 
-- **`isBlank()` and a `\R` line split disagree on NEL.** `isBlank()` is built on
-  `Char.isWhitespace()`, which accepts U+2028/U+2029 but not NEL (U+0085, category Cc), while
-  `Regex("\\R")` splits on all three. A text that is only NEL passes an `isBlank()` gate and then
-  renders as empty lines through a `\R` split. `lines()` and `BufferedReader.lines()` split only
-  on CR and LF, so they disagree with `\R` as well. When a gate and a renderer must agree, derive
-  the blank check from the renderer's split:
-  `fun String.splitLineBreaks(): List<String> = split(Regex("\\R"))` and
-  `fun String.isBlankAcrossLineBreaks(): Boolean = splitLineBreaks().all { it.isBlank() }`.
-  Format characters (Cf: zero-width space, BOM) are blank for neither; handle them separately if
-  they matter. **Nothing** reports it.
+- **`isBlank()` lets invisible-only text through.** `isBlank()` is built on
+  `Char.isWhitespace()`, which accepts U+2028/U+2029 but not NEL (U+0085), the other
+  non-whitespace controls (category Cc: U+0001, U+007F, U+009B) or format characters (category
+  Cf: zero-width space U+200B, ZWJ U+200D, word joiner U+2060, BOM U+FEFF, soft hyphen U+00AD,
+  tags such as U+E0001). A text of only those passes an `isBlank()` gate, and a NEL-only text
+  then renders as empty lines through a `Regex("\\R")` split. `lines()` and
+  `BufferedReader.lines()` split only on CR and LF, so they disagree with `\R` as well. When a
+  gate must reject text that would show nothing, check a stripped copy and keep the text itself:
+  `private val INVISIBLE: Regex = Regex("[\\p{Cc}\\p{Cf}]")` and
+  `fun String.isVisiblyBlank(): Boolean = replace(INVISIBLE, "").isBlank()`. Every `\R` break is
+  either Cc (LF, CR, VT, FF, NEL) or a separator `isBlank()` already accepts (U+2028, U+2029), so
+  checking the whole text gives the same answer as checking each `\R` line with the same strip,
+  and the gate needs no split of its own. The regex matches code points, so a supplementary Cf
+  such as U+E0001 goes too. It tests categories, not rendering: a few Cf characters draw a glyph
+  (for example U+0600–U+0605 and U+06DD) and count as blank, and invisible characters that are
+  neither whitespace nor Cc or Cf count as text (variation selector U+FE0F, Hangul filler U+3164,
+  U+2800). **Nothing** reports it.
 
 ## Gotchas
 
@@ -243,7 +250,7 @@ effect is wanted.
 - Agent compares `BigDecimal` with `==` - scale-sensitive; `1.0 != 1.00`.
 - Agent converts a `Char` digit with `toInt()` - gets the character code.
 - Agent formats a number with `"%.2f".format(x)` for a file or API - a comma decimal separator under some locales.
-- Agent gates user text with `isBlank()` and renders it with a `\R` split - a NEL-only text passes the gate and renders as empty lines.
+- Agent gates user text with `isBlank()` - a text of only NEL, zero-width or non-whitespace control characters passes, then may render as empty lines or nothing.
 
 ## Official sources
 
