@@ -140,11 +140,11 @@ redirect policy or pool sizes differ, or when the hosts together keep more idle 
   | Body, closed without reading | go1.26.10 | go1.27.3, next GET 50 or 300 ms later | go1.27.3, next GET at once (a race) |
   |---|---|---|---|
   | 1 KiB, Content-Length or chunked | new connection | reused | reused in 92–100 % of runs |
-  | 200 or 256 KiB, Content-Length or chunked | new connection | reused | new connection in most runs (reused in 0–50 %) |
+  | 200 or 256 KiB, Content-Length or chunked | new connection | reused | new connection in most runs (reused in 3–50 % over three batches of 30–40 on go1.27.3; 0–36 % on go1.27.1) |
   | 256 KiB + 1 (length); 300 KiB (length or chunked) | new connection | new connection | new connection |
   | 2 KiB with a 20 ms pause mid-body | new connection | reused | new connection (0 of 30 runs on 1.27.3, 0 of 300 on 1.27.1) |
   | 2 KiB with a 100 ms pause mid-body | new connection | new connection | new connection |
-  | read to EOF, never closed (1 KiB, 300 KiB) | reused | reused | reused |
+  | read to EOF, never closed (1 KiB, 300 KiB) | reused | reused | reused (row not re-run; go1.27.1/go1.26.8) |
 
   Twenty back-to-back GETs that closed unread bodies dialed 1–2 connections for 1 KiB, 1–3 for
   16 KiB, 2–4 for 64 KiB and 2–6 for 200 KiB on go1.27.1 (45 or more runs each), and always 20
