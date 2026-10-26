@@ -19,13 +19,13 @@ Contents: [Choose the client](#choose-the-client) ·
 | `RestClient` | Blocking stack (MVC, virtual threads, JPA). Default choice | `spring-boot-starter-restclient` |
 | HTTP interface (`@HttpExchange` + `@ImportHttpServices`) | Several endpoints of one API; you want a typed Kotlin interface instead of call-site URIs | same (uses `RestClient` underneath by default) |
 | `WebClient` | Reactive or coroutine code that must not block (`awaitBody`) | `spring-boot-starter-webclient` |
+| Vendor SDK (Slack, AWS, ...) | The vendor maintains auth, pagination, rate-limit handling | vendor artifact; check its own retry/timeout defaults |
 
 `WebClient` buffers a response body in memory up to 256 KB by default (codec `maxInMemorySize`); a
 larger JSON document fails (through `retrieve()` as a `WebClientResponseException` whose cause is
 `DataBufferLimitException`). Raise it deliberately with `spring.http.codecs.max-in-memory-size`
 (applies to the injected `WebClient.Builder`) or on the builder's codecs, or stream the response,
 rather than removing the limit.
-| Vendor SDK (Slack, AWS, ...) | The vendor maintains auth, pagination, rate-limit handling | vendor artifact; check its own retry/timeout defaults |
 
 Boot 4 split client support into these starters; `spring-boot-starter-webmvc` alone does not
 auto-configure `RestClient.Builder`.

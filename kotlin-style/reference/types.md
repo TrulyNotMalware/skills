@@ -103,8 +103,8 @@ data class Line(val sku: String, val quantity: Int, val unitCents: Long)
   return types on public declarations compile errors (`NO_EXPLICIT_VISIBILITY_IN_API_MODE`,
   `NO_EXPLICIT_RETURN_TYPE_IN_API_MODE`). detekt `LibraryCodeMustSpecifyReturnType` is not in the
   CLI jars; it ships in the separate `detekt-rules-libraries` plugin.
-- A property with a getter is recomputed on every access: `val now get() = Instant.now()` returns
-  a new value each time, `val now = Instant.now()` keeps the first. Pick deliberately.
+- A property with a getter is recomputed on every access: `val now: Instant get() = Instant.now()` returns
+  a new value each time, `val now: Instant = Instant.now()` keeps the first. Pick deliberately.
 
 ## Casts and generics
 

@@ -78,7 +78,8 @@ logic. Name subtests so `-run 'TestParseCount/negative'` selects one. Cases incl
 
 - Compare structures with `cmp.Diff` and print the diff with its direction; compare errors with
   `errors.Is`/`errors.AsType`, not message strings. Do not build a private assertion library.
-- `t.TempDir()`, `t.Setenv()`, `t.Chdir()` and `t.Context()` clean up after themselves; prefer them
+- `t.TempDir()`, `t.Setenv()`, `t.Chdir()` and `t.Context()` `(toolchain ≥1.24)` clean up after
+  themselves; prefer them
   to `os.MkdirTemp`, `os.Setenv`, `os.Chdir` and `context.Background()`. Reported by:
   `golangci:usetesting (opt-in)` for the first three; `context.Background()` not by default.
 
@@ -102,14 +103,12 @@ run. Teardown that needs a context makes its own:
 ```go
 func TestWithServer(t *testing.T) {
 	ctx := t.Context() // canceled when the test ends, before Cleanup functions run
+	stop := func(context.Context) {} // stands in for the real teardown call
 	t.Cleanup(func() {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		stop(stopCtx)
 	})
-	if err := ctx.Err(); err != nil {
-		t.Fatal(err)
-	}
 }
 ```
 
@@ -190,7 +189,8 @@ count as blocked in the bubble, so use in-memory pipes such as `net.Pipe` (docs)
   and passed in default order.
 - **`-race`** finds data races only on paths the tests execute; plain `go test` passed a racy
   counter ([concurrency](concurrency.md#maps-and-the-race-detector)).
-- **`go test` runs 12 vet analyzers, not 35** (`-vet=all` runs them all)
+- **`go test` runs 12 vet analyzers, not 35** `(toolchain ≥1.27; 11 before, without stdversion)`
+  (`-vet=all` runs them all)
   ([versions-tools](versions-tools.md#what-each-tool-runs)). It runs them even for packages with no
   test files (a printf mistake fails the package as `[build failed]`; `-vet=off` skips them), and
   from 1.27 the subset includes `stdversion`, so an API newer than the `go` line fails `go test`.

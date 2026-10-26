@@ -135,19 +135,18 @@ data class Credentials(val user: String, val password: String) {
 
   `CancellationException` extends `IllegalStateException`, so `catch (e: IllegalStateException)`
   swallows it too. The broad `catch (e: Exception)` above is deliberate (one failed id must not stop
-  the others) and still triggers detekt `TooGenericExceptionCaught`; suppress it there with a
-  reason. detekt `TooGenericExceptionCaught` (default) reports the `catch (Exception)`;
-  detekt 2.0 `SuspendFunSwallowedCancellation` (opt-in, type resolution) reports the swallowed
-  cancellation, but also a `catch (CancellationException)` that logs before rethrowing (a false
-  positive). detekt 1.23.8 has the rule but missed both cases on Kotlin 2.4 code. Structured
+  the others) and still triggers detekt `TooGenericExceptionCaught` (default); suppress it there
+  with a reason. detekt 2.0 `SuspendFunSwallowedCancellation` (opt-in, type resolution) reports the
+  swallowed cancellation, but also a `catch (CancellationException)` that logs before rethrowing (a
+  false positive). detekt 1.23.8 has the rule but missed both cases on Kotlin 2.4 code. Structured
   concurrency and dispatchers are covered by the coroutines reference of the kotlin-spring-boot
   skill.
 - **`catch (e: Exception)` and `runCatching` also catch `InterruptedException`**, and by then the throw has
   already cleared the thread's interrupt flag. Blocking code that treats it as an ordinary failure keeps
   running, and a later `Thread.currentThread().isInterrupted` check in the same loop never fires. Rethrow
-  it, or call `Thread.currentThread().interrupt()` before handling it as a failure. Inside a Spring
-  `TransactionTemplate` callback a rethrown checked exception comes back as `UndeclaredThrowableException`
-  (Framework 7), so restore the flag there and return a failure instead. detekt's
+  it, or call `Thread.currentThread().interrupt()` before handling it as a failure. With Spring's
+  `TransactionTemplate`, a rethrown checked exception from the callback comes back as
+  `UndeclaredThrowableException`, so restore the flag there and return a failure instead. detekt's
   `TooGenericExceptionCaught` flags the broad `catch`, not the lost interrupt.
 - Never catch `Throwable` or `Error`. Close resources with `use { }`. Two shapes are the exceptions: catch an
   `Error` only to log or record it and rethrow the same instance, or translate it at a framework boundary
@@ -181,7 +180,13 @@ kotlin {
   no warnings for a module that also has errors (Kotlin 2.4; `-Xreport-all-warnings` keeps them),
   so they appear only once the errors are fixed. By default Gradle 9.7 prints them as plain
   `w: file:line` lines; with `--warning-mode all` it renders them as "Problem found" blocks and
-  showed only the first 15 (15 of 20 and 15 of 23 in two runs) without saying so.
+  showed only the first 15 (15 of 20 and 15 of 23 in two runs) without saying so. The mode can
+  also come from `org.gradle.warning.mode=all` in `gradle.properties`, or from a convention plugin
+  or init script that writes it, so check before counting: a `w:` count of 0 next to problem blocks
+  means the mode is on, and exactly 15 blocks means the list was cut. On Gradle 9.8.0 with KGP
+  2.4.10, `--warning-mode=summary` printed the warnings nowhere on the console. The complete list
+  is always in `build/reports/problems/problems-report.html` (count the distinct
+  `"path":…,"line":` entries), so that report, not the console, is the source of truth.
   `-Xrender-internal-diagnostic-names` adds the diagnostic name (`[RETURN_VALUE_NOT_USED]`) in both
   modes. Warnings are printed only when the task compiles: an UP-TO-DATE `compileKotlin` prints
   none, so rerun it (`--rerun-tasks`, or after `clean`) before concluding there are no warnings.

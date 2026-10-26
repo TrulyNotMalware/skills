@@ -77,7 +77,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, TaskOwner]]:
   `Exception in ASGI application` after the client already has its `200`. For anything that must
   survive a restart use a queue or a job table.
 - uvicorn waits for the code after `yield` in `lifespan` without any timeout;
-  `--timeout-graceful-shutdown` bounds in-flight requests only. Bound your own cancellation waits.
+  `--timeout-graceful-shutdown` bounds in-flight requests and background tasks, not the `lifespan`
+  shutdown code. Bound your own cancellation waits.
 
 ## Cancellation
 
@@ -93,18 +94,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[dict[str, TaskOwner]]:
   task that awaits `asyncio.to_thread(...)` does **not** stop the thread; the thread runs to
   completion with nobody waiting for its result, and an exception it raises afterwards is dropped
   without a log line.
-- A client disconnect does **not** cancel a normal request handler. The handler runs to the end,
-  its writes happen, and the response is discarded. Only a `StreamingResponse` body is cancelled
-  when the client goes away, and only at the generator's **own** next suspending `await`
-  (`CancelledError` in the generator, `finally` runs). `send` after a disconnect returns
-  immediately without suspending, so a generator that only yields is never cancelled: it runs to
-  exhaustion at the moment of disconnect, writing every remaining chunk into the void. Add
-  `await asyncio.sleep(0)` per chunk when the body is expensive to produce. Behind a
-  `BaseHTTPMiddleware` (`@app.middleware("http")`) such a generator is not even exhausted: it
-  stays suspended at `yield`, and its `finally` runs neither at disconnect nor at SIGTERM, only
-  at a later garbage collection. Even a generator that awaits is occasionally abandoned this way
-  behind `BaseHTTPMiddleware` (the disconnect can land while it is parked at `yield`; 2 of 26
-  disconnects here). Do not rely on a streaming generator's `finally` for timely cleanup.
+- A client disconnect does **not** cancel a normal request handler. The handler runs to the end, its
+  writes happen, and the response is discarded. Only a `StreamingResponse` body is cancelled when
+  the client goes away, and only at the generator's **own** next suspending `await`
+  (`CancelledError` in the generator, `finally` runs). `send` after a disconnect returns immediately
+  without suspending, so a generator that only yields is never cancelled: it runs to exhaustion at
+  the moment of disconnect, writing every remaining chunk into the void. Add `await
+  asyncio.sleep(0)` per chunk when the body is expensive to produce. Behind a `BaseHTTPMiddleware`
+  (`@app.middleware("http")`) such a generator is not even exhausted: it stays suspended at `yield`,
+  and its `finally` runs neither at disconnect nor at SIGTERM, only at a later garbage collection.
+  Even a generator that awaits is occasionally abandoned this way behind `BaseHTTPMiddleware` (the
+  disconnect can land while it is parked at `yield`; 2 of 26 disconnects in one measurement).
+  Do not rely on a streaming generator's `finally` for timely cleanup.
 - `await request.is_disconnected()` consumes one ASGI message. Called before the request body
   was read, it discards buffered body bytes: `request.body()` then returns only the remainder, or
   waits forever when the whole body was in that message. Read the body first, then poll.
@@ -218,7 +219,7 @@ async def bounded_map[T, R](
 - Agent starts a task in `lifespan` and never cancels it - under SIGTERM it vanishes without `CancelledError` or `finally`; under Ctrl+C it is cancelled, so local runs look fine.
 - Agent writes `except Exception:` around an await and expects to see cancellation - it passes through (correct), but `except BaseException:` or a bare `except:` swallows it.
 - Agent catches `CancelledError` to "clean up" and returns - the task looks successful to its caller.
-- Agent expects a client disconnect to stop the handler - it runs to completion; only streaming bodies are cancelled, only at the generator's own `await`, and not at all behind `BaseHTTPMiddleware` when the generator never awaits.
+- Agent expects a client disconnect to stop the handler - it runs to completion; only streaming bodies are cancelled, only at the generator's own `await`, and behind `BaseHTTPMiddleware` not at all when the generator never awaits (and occasionally not even when it does).
 - Agent polls `request.is_disconnected()` before reading the body - part of the body is lost, or `body()` hangs.
 - Agent wraps a blocking call or a CPU loop in `asyncio.timeout` - it cannot fire during the call, and fires afterwards only at a real suspension.
 - Agent reads `task.result()` of a `TaskGroup` child that was cancelled individually - `CancelledError`, although the group succeeded.

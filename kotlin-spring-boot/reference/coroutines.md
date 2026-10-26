@@ -29,7 +29,7 @@ Contents: [Choose the concurrency model](#choose-the-concurrency-model) ·
   moves to whatever is actually finite: often the connection pool, but also lock contention, CPU, or a
   downstream service. Bound concurrency deliberately (semaphore, bulkhead) instead of relying on
   thread counts.
-- `spring.threads.virtual.enabled=true` also switches Boot's scheduler and `@Async` executor:
+- When Boot creates the scheduler and executor, `spring.threads.virtual.enabled=true` also switches them:
   `spring.task.scheduling.pool.size` stops applying and all `fixedDelay` jobs share one thread
   ([scheduling-executors](scheduling-executors.md#which-scheduler-runs-scheduled)).
 - Mixing coroutines and virtual threads is possible (`Executors.newVirtualThreadPerTaskExecutor()

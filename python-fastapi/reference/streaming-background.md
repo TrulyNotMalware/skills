@@ -69,7 +69,8 @@ async def export() -> StreamingResponse:
   its next **own** `await` (`CancelledError`, `finally` runs). uvicorn's `send` never suspends
   after a disconnect, so a generator whose only suspension point is the `yield` runs to the end,
   writing into the void, and an endless one hangs the process (asyncio and uvloop alike;
-  [asyncio-concurrency](asyncio-concurrency.md#cancellation)). Generator endpoints differ (next section).
+  [asyncio-concurrency](asyncio-concurrency.md#cancellation)); behind `BaseHTTPMiddleware` the
+  cancellation can also be missed. Generator endpoints differ (next section).
 - `GZipMiddleware` still streams (chunks arrive as produced), but it holds status and headers back
   until the first body chunk, and it never compresses `text/event-stream`.
 - Test clients buffer the whole stream ([testing](testing.md#choosing-a-client)).

@@ -51,8 +51,9 @@ lint config, the CI scripts and the root `AGENTS.md`/`CLAUDE.md` first.
 2. **Write the signature before the body**: `ctx` first if it can block, `error` last, concrete
    return types, and who waits for any goroutine it starts.
 3. **Run the checks the project runs, then these**:
-   - `gofmt -l .` (or goimports) and `go vet ./...` (or `go test -vet=all`): plain `go test` runs
-     12 of vet's analyzers, so copylocks, lostcancel, loopclosure and structtag findings need this.
+   - `gofmt -l .` (or goimports) and `go vet ./...` (or `go test -vet=all`): plain `go test` runs 12
+     of vet's analyzers (11 before toolchain 1.27), so copylocks, lostcancel, loopclosure and
+     structtag findings need this.
    - The project's linter; for complete golangci-lint output add `--uniq-by-line=false
      --max-issues-per-linter=0 --max-same-issues=0`. No config: use the
      [baseline](reference/versions-tools.md#golangci-lint-baseline).
@@ -73,8 +74,8 @@ each).
   dropped at the top, never both. No `_ =` on an error without a comment saying why it is safe.
   Return `(T, error)` or `(T, bool)` instead of in-band values like `-1`.
 - **Error strings** are lowercase, end without punctuation, and skip "failed to". Match errors with
-  `errors.Is`/`errors.As`/`errors.AsType`, never `==` on a possibly wrapped error or the message
-  text. `%w` makes the wrapped error part of your API.
+  `errors.Is`/`errors.As`/`errors.AsType` `(toolchain ≥1.26)`, never `==` on a possibly wrapped
+  error or the message text. `%w` makes the wrapped error part of your API.
 - **Return early**; the happy path stays at the left margin, no `else` after `return`.
 - **No panic for ordinary failures.** `MustX` only at initialisation or in tests; a panic used
   inside a package never escapes its API (programmer-error panics such as `MustCompile` are fine).

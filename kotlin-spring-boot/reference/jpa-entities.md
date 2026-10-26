@@ -242,13 +242,14 @@ with `@EntityGraph` or `join fetch` for bounded graphs, or with a projection for
     when the `order by` references the fetched collection or contains a correlated subquery, and (from
     source, not run) when the `org.hibernate.limitInMemory` hint is set or the dialect lacks
     offset-in-subquery support, such as Sybase.
-  - Where 7.4 applies the rewrite, three shapes that 7.3 paged in memory broke in the runs. A `where`
-    on the fetch alias is an SQL grammar error (`missing FROM-clause entry`). A second join to the same
-    collection without `distinct` (`join o.items x join fetch o.items where x.sku in ...`) silently
-    returns wrong pages and totals (7.3 paged the same query correctly), and a `List` can hold
-    duplicated children (on 7.3 as well); `select distinct o` fixes both. A correlated scalar subquery
-    in the select list (`select o, (select count(...) ...) from Order o join fetch o.items`) silently
-    returns duplicate parents with truncated collections.
+  - Where 7.4 applies the rewrite, three shapes that 7.3 paged in memory broke in the runs. A
+    `where` on the fetch alias is an SQL grammar error (`missing FROM-clause entry`). A second join
+    to the same collection without `distinct` (`join o.mutableItems x join fetch o.mutableItems
+    where x.sku in ...`) silently returns wrong pages and totals (7.3 paged the same query
+    correctly), and a `List` can hold duplicated children (on 7.3 as well); `select distinct o`
+    fixes both. A correlated scalar subquery in the select list (`select o, (select count(...) ...)
+    from Order o join fetch o.mutableItems`) silently returns duplicate parents with truncated
+    collections.
   - The count query of a `Page` must count the same parents as the content: same filters and join
     semantics, without the fetch, and `count(distinct o)` when a join can repeat a parent. A mismatch
     shows up as a wrong `totalElements` and `hasNext` on full pages while the content is right (Spring
@@ -260,16 +261,17 @@ with `@EntityGraph` or `join fetch` for bounded graphs, or with a projection for
     for any of the shapes above (run on 7.3.13 and 7.4.5, H2 and PostgreSQL).
 
     ```kotlin
+    // in OrderRepository (the interface above), same model: UUID ids, mapped name mutableItems
     @Query("select o.id from Order o where o.customerId = :customerId and exists (select 1 from OrderItem i where i.order = o)",
         countQuery = "select count(o) from Order o where o.customerId = :customerId and exists (select 1 from OrderItem i where i.order = o)")
-    fun findIdsWithItems(customerId: Long, pageable: Pageable): Page<Long>
-    @Query("select distinct o from Order o join fetch o.items where o.id in :ids")
-    fun findWithItemsByIdIn(ids: Collection<Long>): List<Order>
-    // service
+    fun findIdsWithItems(customerId: UUID, pageable: Pageable): Page<UUID>
+    @Query("select distinct o from Order o join fetch o.mutableItems where o.id in :ids")
+    fun findWithItemsByIdIn(ids: Collection<UUID>): List<Order>
+    // service, with orderRepository: OrderRepository injected
     @Transactional(readOnly = true)
-    fun pageWithItems(customerId: Long, pageable: Pageable): Page<Order> {
-        val ids = orders.findIdsWithItems(customerId, pageable)
-        val byId = if (ids.hasContent()) orders.findWithItemsByIdIn(ids.content).associateBy { it.id!! } else emptyMap()
+    fun pageWithItems(customerId: UUID, pageable: Pageable): Page<Order> {
+        val ids = orderRepository.findIdsWithItems(customerId, pageable)
+        val byId = if (ids.hasContent()) orderRepository.findWithItemsByIdIn(ids.content).associateBy { it.id!! } else emptyMap()
         return ids.map { byId.getValue(it) }
     }
     ```

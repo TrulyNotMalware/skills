@@ -1,6 +1,6 @@
 # HTTP client
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, `net/http` as the
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, `net/http` as the
 client and golangci-lint v2.14 for linter findings, unless a rule carries a version tag. Measured
 on go1.27.1 and go1.26.8 over HTTP/1.1 unless a row says otherwise. Every mistake here works
 against a healthy upstream on localhost: the hang needs a silent server, the leak needs hours of

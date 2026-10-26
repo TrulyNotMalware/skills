@@ -1,6 +1,6 @@
 # Daemons: following files and shipping lines
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, golang.org/x/sync
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, golang.org/x/sync
 v0.24.0 (errgroup) and fsnotify v1.10.1 unless a rule carries a version tag. fsnotify ran on darwin
 (kqueue); Linux (inotify) statements come from its source and the man pages (docs). A log collector
 that loses or duplicates lines still exits 0 and passes a test that writes a file once and reads it
@@ -13,6 +13,35 @@ Contents: [Process structure](#process-structure) · [Following a file](#followi
 [Signals and supervision](#signals-and-supervision) · [Gotchas](#gotchas)
 
 ## Process structure
+
+A sketch, not a complete program: `logship` is the collector's own package, elided here. The code
+below assumes these signatures, taken from the prose around it (the `Batch` numbers are max
+lines, flush interval and final-flush timeout). Declarations only, so this block does not compile
+on its own:
+
+```text
+func RemoveStaleTemps(path string) error
+func LoadCheckpoint(path string) (Pos, error)
+func SaveCheckpoint(path string, p Pos) error
+func Follow(ctx context.Context, path string, from Pos, poll time.Duration, wake <-chan struct{}, out chan<- Line) error
+func Batch(ctx context.Context, in <-chan Line, maxLines int, every, final time.Duration,
+	flush func(context.Context, []Line) error) error
+func (s *HTTPSink) Send(ctx context.Context, key string, body []byte) error
+type Pos struct {
+	File   string
+	Offset int64
+}
+type Line struct {
+	Text string
+	Pos  Pos
+}
+type HTTPSink struct {
+	Client             *http.Client
+	URL                string
+	Attempts           int
+	BaseDelay, MaxDelay time.Duration
+}
+```
 
 ```go
 func run(ctx context.Context, path, ckpt, url string, poll time.Duration) error {
@@ -161,7 +190,7 @@ func atEOF(f *os.File, path string, read int64) (truncated, rotated bool, err er
 ```
 
 On `truncated` `Follow` seeks to 0; on `rotated` it sends the unfinished last line and opens `path`
-at offset 0 with its device:inode (`"%d:%d"` of `syscall.Stat_t` `Dev` and `Ino`: a string, as
+at offset 0 with its device:inode (`"%d:%d"` of `syscall.Stat_t` `Dev` and `Ino`, Unix only: a string, as
 gosec G115 reports `uint64(st.Dev)`, an `int32` on darwin).
 
 - **Between rename and create `os.Stat(path)` fails with `fs.ErrNotExist`**: keep reading the old

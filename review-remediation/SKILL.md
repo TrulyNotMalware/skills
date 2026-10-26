@@ -26,14 +26,15 @@ right but wrong together. This skill is the order of work that catches those bef
 ## Workflow
 
 1. **Pin the baseline.** Record your current commit (`git rev-parse HEAD`) and find the commit
-   the review was written against (the review's header, the PR head at review time, or ask).
-   If they differ, or the review's commit is unknown, say so and re-locate every cited
-   `file:line` before judging it. Quoted code can come from an older commit or from another
+   the review was written against (the review's header, or the PR head at review time). If
+   they differ, or the review's commit is unknown, say so and re-locate every cited `file:line`
+   before judging it. Quoted code can come from an older commit or from another
    machine's configuration.
 2. **Triage each finding from the source.** Open the cited file, its callers and the documented
    intent next to it (comments, migrations, `AGENTS.md`/`CLAUDE.md`, ADRs). Record a verdict with
    one line of evidence: *confirmed*, *confirmed with a narrower condition*, *conclusion right but
-   mechanism wrong*, *false positive*, *stale*, or *needs a run*. A finding nobody can run stays
+   mechanism wrong*, *false positive*, *stale*, *needs a run*, or *unverified*. Run a
+   needs-a-run finding now, or report it as open under step 8. A finding nobody can run stays
    *unverified*: do not act on it as fact and do not write it into documentation as fact.
 3. **Judge the fix separately from the finding.** A correct finding often comes with a fix that
    breaks something the reviewer did not see. Before applying a suggested change, check:
@@ -63,14 +64,15 @@ right but wrong together. This skill is the order of work that catches those bef
    (a profile endpoint that returns an e-mail for user tokens promised nothing for bot tokens, and
    the scope it needed had to be requested together with another one).
 6. **Apply in small batches and re-check each batch.** Run an independent review lane and the
-   execution checks on each batch's diff. Fixes interact with each other and with existing code,
-   and a defect created by the remediation cannot be in the original review.
-7. **Prove the tests pin the fix.** Revert the fix (or restore the old condition) and watch the
-   new test fail; a test that passes either way pins nothing. Ask whether the test environment
-   can see the defect at all (Evidence rules). Besides fakes, add one run of the real component
-   against a fake upstream (for example the real CLI against a fake model API). Run the revert
-   loop in a copy of the tree, never in place, even when you work alone: a background build or
-   test run is a concurrent reader too. See [parallel-workers](reference/parallel-workers.md).
+   execution checks on each batch's diff. Without a second lane, re-read the diff against each
+   finding after a break from it, and run the execution checks. Fixes interact with each other and
+   with existing code, and a defect created by the remediation cannot be in the original review.
+7. **Prove the tests pin the fix.** Revert the fix (or restore the old condition) and watch the new
+   test fail; a test that passes either way pins nothing. Ask whether the test environment can see
+   the defect at all ([evidence](reference/evidence.md)). Besides fakes, add one run of the real
+   component against a fake upstream (for example the real CLI against a fake model API). Run the
+   revert loop in a copy of the tree, never in place, even when you work alone: a background build
+   or test run is a concurrent reader too. See [parallel-workers](reference/parallel-workers.md).
 8. **Report honestly.** "Done (unverified)" is *not done*: list it as open with what is needed
    to verify it. Keep measured facts and inferences in separate sections, especially in text
    that another agent or worker will act on; it treats everything in a "facts" list as measured.
@@ -85,70 +87,14 @@ right but wrong together. This skill is the order of work that catches those bef
 |---|---|
 | [interactions](reference/interactions.md) | A fix changes acknowledgement, retries, attempt refunds or requeues, deduplication, transactions, persistence-context clearing, counters, or behavior in only some modes or profiles |
 | [parallel-workers](reference/parallel-workers.md) | Remediation or verification is split across subagents, worktrees or concurrent scripts, or you are about to run revert checks while anything else (a background build, a test run, a review lane) reads the tree |
+| [evidence](reference/evidence.md) | You are about to rely on a probe, a negative result, a test environment, a measurement or a default, to write a finding into documentation, or to edit many files by script |
 
-## Evidence rules
+## Evidence
 
-- **Open the cited file.** In one review, three false positives became visible only after
-  opening the cited source.
-- **Trace the mechanism a finding describes before writing it into documentation.** A finding
-  said a lost status write would "re-deliver under a new event id"; the code's recovery sweep
-  reclaims the same row, so the id never changes and the deduplication advice written from the
-  finding was wrong. The finding was right about the risk and wrong about the path, and the
-  path was copied (caught by a second, independent review).
-- **Check user-facing text that a plan or a fix introduces against what the product lets the user do,
-  and against the module's own wording rules, before a worker gets it as an exact string.** A plan told
-  users to "ask me here" in the bot's direct message, which the production manifest keeps read-only, and
-  named the transport inside a transport-neutral domain; the worker followed the strings and rewrote the
-  documented rule to fit them. Both reached the review lanes untouched. A worker reporting that it changed a
-  rule sentence to match a brief is the signal to re-read the brief.
-- **Know who answered an external probe.** Check `server`, `WWW-Authenticate` and similar
-  headers, and probe a path that does not exist as a control. A 401 from an auth proxy in front
-  of the app says nothing about the app.
-- **A negative result describes one configuration.** "Not reproduced", "no tool catches it" and
-  "that property does not exist" depend on the scale, classpath, database, event loop and data
-  shape you used. Vary the configuration before excluding a finding.
-- **Check what the test environment can see.**
-  - An embedded database that shares the application's clock hides mismatches between
-    database-generated and application-computed timestamps (zone-less columns, a production
-    database in another time zone).
-  - A mocked transaction manager checks call order, not transaction boundaries. It also never sets
-    `TransactionSynchronizationManager.isActualTransactionActive()`: a guard you add to a repository
-    method (refuse or require an active transaction) is invisible to a mocked-manager spec of its
-    caller. Pin the guard through the real caller with a real transaction manager, and check that the
-    spec fails with the guard removed (Spring; any guard that reads the synchronization state).
-  - Tests that never start the application/DI context never test wiring; tests that commit per
-    call model a boundary that production does not have.
-  - An in-process test client is not a client on a real socket: it can re-raise server errors
-    and wait for background work that a real client never waits for, and it accepted a 204
-    response with a body on which the real server dropped the connection.
-  - A stub that returns a ready-made SDK response object skips the SDK's own response handling.
-    A structured-output `parse` helper validated the body inside the call, so a refusal that
-    carried text (anthropic 1.13 `messages.parse`) and an incomplete response with partial text
-    (openai 2.53 `responses.parse`) surfaced as schema errors before the caller could read the
-    stop reason or status. Stubbed tests could not see it; a test that drove the real client
-    over an in-memory transport did.
-- **When an old test fails after your fix, check its expected value before reverting the fix.**
-  A test that pins the defect (for example `verify(exactly = 1)` on a resend) fails on the
-  correct fix, and while it passes it tells the next reviewer the defect is intended.
-- **A gate you pipe is no gate.** In `run-tests | tail -1 && deploy` the `&&` sees the status of
-  `tail`, so the deploy runs on failing tests (zsh and bash without `pipefail`). Run the gate
-  unpiped and trim its output afterwards, or set `pipefail`.
-- **Verify the measurement too.** A timer started after the blocking call measured nothing (it
-  reported zero delay); when a number contradicts the expectation, suspect the harness first.
-- **Measure defaults; do not read them from a configuration object.** A value absent from a
-  settings dict can still have an effective default elsewhere. Confirm a "fails fast" claim by
-  starting without the value: some binders keep an unresolved placeholder as a literal string,
-  and for a secret that placeholder text becomes the key.
-- **One observation supports "under this condition, this result", nothing wider.**
-
-## Editing many files by script
-
-- `assert old in text` before every replacement. A replacement whose anchor is missing does
-  nothing and reports success.
-- Formatters (ktlint, ruff format, prettier) reflow lines and silently move anchors. Re-read the
-  file after formatting and re-anchor.
-- When a multi-step script fails midway, find which steps already applied (`git diff --stat`,
-  `grep`) and rerun only the rest.
+Open every cited file, trace the mechanism before documenting it, and check what the test
+environment can see before trusting a green run. Negative results and single observations hold
+for one configuration only. Scripted bulk edits need an anchor assertion per replacement. Read
+[evidence](reference/evidence.md) before you accept a negative result or edit by script.
 
 ## Gotchas
 
@@ -159,12 +105,8 @@ right but wrong together. This skill is the order of work that catches those bef
   compile.
 - Agent marks an item done because the suite is green - the test environment could not see the
   defect, or the new test passes with the fix reverted.
-- Agent trusts an old test that pins the defect - the re-review lane passes the code because the
-  test agrees with it.
 - Agent hands a worker an inference listed as a measured fact - the worker copies it into code
   comments and documents as truth.
-- Agent excludes a finding after one failed reproduction - it reproduces at a larger scale or
-  with another configuration.
 - Agent fixes the sentence the reviewer quoted - the same claim survives in the summary, a table
   and a Gotcha.
 - Agent corrects an overstatement with the opposite overstatement - the correction is not held to
@@ -182,10 +124,9 @@ right but wrong together. This skill is the order of work that catches those bef
   did not know about waits too. Find the stages in the framework source (lifecycle phases, blocking
   `stop()`/`destroy()`, nested transactions), measure with every one held busy and small timeouts, and
   pin the sum in a test.
-- Agent adds a transaction guard to a repository method and re-runs the callers' mocked-manager specs -
-  they stay green while the production caller throws from inside its own `TransactionTemplate`; one
-  spec must go through the real caller with a real manager.
-
+- Agent adds a transaction guard to a repository method and re-runs the callers' mocked-manager specs
+  (Spring) - they stay green while the production caller throws from inside its own
+  `TransactionTemplate`; one spec must go through the real caller with a real manager.
 - Agent reverts a fix in place because it works alone - a background build or test run reads the
   reverted file and reports the revert as a failure (or builds an image from it), and a restore of
   the same size within the same second leaves the reverted bytecode in the cache.
@@ -196,12 +137,9 @@ right but wrong together. This skill is the order of work that catches those bef
 - Agent's test fixture for a secret (a 32-character minimum, a key) trips the repository's secret
   scanner on the pull request - its entropy rule reads the fixture as a credential. Use a
   repetitive, obviously fake value and run the scanner on the diff before pushing.
-- Agent pipes the test run through `tail` before `&&` - the deploy step runs although tests failed.
 - Agent follows this file but does not open the reference the table routes to - it rebuilds a
-  defect that interactions already lists (in the incident, one counter used as both ownership token
+  defect that interactions already lists (in one run, one counter used as both ownership token
   and give-up budget).
-- Agent documents a finding's description of a mechanism ("a new id on redelivery") without tracing
-  it - the risk is real, the path is not, and the documented mitigation targets the wrong path.
 
 ## Maintaining this skill
 

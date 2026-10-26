@@ -44,7 +44,9 @@ HttpClient = Annotated[httpx.AsyncClient, Depends(get_http)]
 - The shared client also shares its **cookie jar**: a `Set-Cookie` from a call made for one user
   is sent on the next call made for another user. Per-request `cookies=` does not help (it is
   merged with the jar, and it is deprecated in 0.28). Give the client a jar that stores nothing
-  and pass per-user credentials as an explicit header, which wins over the jar:
+  and pass per-user credentials as an explicit header, which wins over the jar (the module-level
+  client below is for illustration; create it in `lifespan` and inject it, see the event-loop
+  bullet below):
 
 ```python
 from http.cookiejar import CookieJar, DefaultCookiePolicy

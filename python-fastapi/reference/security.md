@@ -145,7 +145,7 @@ def verify_password(password: str, hashed: str) -> bool:
   raises the 72-byte `ValueError` for any password, because passlib's backend self-test
   (`detect_wrap_bug`) hashes an over-long secret at load. Every hash and verify call fails.
   passlib is unmaintained; call `bcrypt` (or `argon2-cffi`) directly.
-- Hashing is CPU-bound: `bcrypt` at the default cost took about 170 ms here. In an `async def`
+- Hashing is CPU-bound: `bcrypt` at the default cost took about 170 ms in one measurement. In an `async def`
   handler that stalls every other request for that long; run it through `run_in_threadpool` or
   in a `def` handler ([fastapi-basics](fastapi-basics.md#def-and-async-def-handlers)).
 - Compare API keys and signatures with `secrets.compare_digest`, not `==`; it takes two `str`
@@ -255,7 +255,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DATABASE_URL = "postgresql+asyncpg://app:secret@localhost:5432/app"
-WEBHOOK_SECRET = b"replace-from-settings"
+WEBHOOK_SECRET = b"replace-from-settings"  # a SecretStr in real code
 MAX_BODY = 256 * 1024
 
 

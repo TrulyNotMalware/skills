@@ -147,6 +147,9 @@ Consequences:
   `StreamingResponse` body is generated. A long stream therefore holds its database connection for
   the whole stream.
 
+The engine below is built at import time to keep the block short; in an application create it in
+`lifespan` ([sqlalchemy-async](sqlalchemy-async.md)).
+
 ```python
 from collections.abc import AsyncIterator
 from typing import Annotated
@@ -212,7 +215,8 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   the API description, pass `openapi_url=None`, which removes all three.
 - Put a router's prefix on the `APIRouter` that declares the routes, not in
   `include_router(router, prefix=...)`: only the former is part of `route.path` (`/v1/items/{item_id}`
-  vs `/items/{item_id}`), which metrics use as a label
+  vs `/items/{item_id}`), which metrics use as a label (a prefix on a parent router that aggregates
+  sub-routers is lost either way)
   ([config-observability](config-observability.md#metrics)).
 - `app.frontend("/", directory="dist")` (FastAPI 0.142) serves a built frontend behind all API
   routes, with an `index.html` fallback for any unknown `GET` whose `Accept` includes `text/html`.

@@ -297,7 +297,7 @@ Custom relay rules:
 - Agent applies custom-relay rules (status updates, after-image filters) to a Debezium Outbox Event Router setup - the router expects an insert-only table.
 - Agent uses `INSERT ... ON CONFLICT DO NOTHING` and then runs the handler anyway - check the affected-row count.
 - Agent encodes the entity as the outbox payload - encode a versioned event DTO.
-- Agent stamps a row's schema version with a first-match `when` (`is NewShapeA -> V5; has fallback -> V4; …`) - a row that combines
+- Agent stamps a row's schema version with a first-match `when` (`is NewShapeA -> V5; has fallback -> V4; …`), when outbox rows are read by binaries of different versions - a row that combines
   two new shapes gets the lower version, so a binary that knows only that version decodes it and silently drops the newer field
   (Jackson ignores unknown properties). Stamp the highest version any part of the envelope needs, including continuation parts and
   nested messages, and pin the combined case.

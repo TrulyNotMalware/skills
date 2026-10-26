@@ -1,9 +1,11 @@
 # Goroutines, channels, context and sync
 
 Applies to Go 1.27.1 with a go.mod `go` line of 1.26 or later, and `golang.org/x/sync` v0.23.0 for
-errgroup (it requires `go 1.26.0`; older go lines pin an older x/sync) ([tags and labels](versions-tools.md#reported-by-vocabulary)). Concurrency bugs pass a
-quick test because the bad interleaving or the early return does not happen in it. Run tests with
-`-race`, and write the test that cancels the context or closes the channel early.
+errgroup. That x/sync version requires `go 1.26.0` (from its go.mod); older go lines pin an older
+x/sync. Tags and labels are explained in [tags and
+labels](versions-tools.md#reported-by-vocabulary). Concurrency bugs pass a quick test because the
+bad interleaving or the early return does not happen in it. Run tests with `-race`, and write the
+test that cancels the context or closes the channel early.
 
 Contents: [The shape to aim for](#the-shape-to-aim-for) · [Goroutine lifetime and leaks](#goroutine-lifetime-and-leaks) ·
 [Channels and select](#channels-and-select) · [context](#context) · [Timers](#timers) · [sync](#sync) ·
@@ -40,7 +42,7 @@ func FetchAll(ctx context.Context, ids []string, limit int,
 The function is synchronous to its caller, takes `ctx` first, bounds the parallelism, cancels `ctx`
 on the first error (that stops the rest only if `fetch` honours it; queued ids still call `fetch`),
 and waits for every goroutine. Capturing `i` and `id` is correct only `(go ≥1.22)`. Without errors
-to collect, `sync.WaitGroup.Go` `(go ≥1.25)` does the same with the standard library:
+to collect, `sync.WaitGroup.Go` `(toolchain ≥1.25)` does the same with the standard library:
 
 ```go
 func processAll(items []string, process func(string)) {
@@ -162,7 +164,7 @@ go 1.21 and 1.22 modules and outside package main; nothing for `time.After`.
   incremented a copy. Use pointer receivers on such types and pass them by pointer. Reported by:
   `vet` (copylocks; `go test` passes).
 - **`wg.Add(1)` inside the goroutine races with `Wait`**: `Wait` returned with 0 of 3 goroutines
-  done. Call `Add` before `go`, or use `wg.Go` `(go ≥1.25)`. Reported by: `vet` (waitgroup,
+  done. Call `Add` before `go`, or use `wg.Go` `(toolchain ≥1.25)`. Reported by: `vet` (waitgroup,
   `(toolchain ≥1.25)`), `staticcheck SA2000`. `go fix:waitgroupgo` `(go ≥1.25)` rewrites the
   correct `Add`/`go`/`Done` form and leaves `Add` inside the goroutine alone.
 - **Keep the mutex next to what it guards**, unexported, and prefer typed atomics for single

@@ -47,16 +47,11 @@ and the root `AGENTS.md`/`CLAUDE.md` first.
    parser or a lookup, and the declared types of public functions and properties.
 4. **Build and read every warning.** The compiler prints no warnings for a module that also has
    compile errors (Kotlin 2.4), so fix errors and build again before judging the warnings. Read them
-   in Gradle's default output (`w:` lines): with `--warning-mode all`, Gradle 9.7 showed only the
-   first 15 Kotlin warnings, as `Problem found: Kotlin compiler warning` blocks. **That mode can
-   also come from `org.gradle.warning.mode=all` in `gradle.properties` or a preset that writes it**
-   — check before counting: a `w:` count of 0 next to problem blocks means the mode is on, and
-   exactly 15 blocks means the list was cut. The complete list is always in
-   `build/reports/problems/problems-report.html` (count the distinct `"path":…,"line":` entries);
-   on Gradle 9.8.0 with KGP 2.4.10, `--warning-mode=summary` printed the warnings nowhere on the
-   console, so the report, not the console, is the source of truth (with the property set by a preset,
-   "0 warnings" was reported for a build that carried 16). An UP-TO-DATE compile task
-   prints none, so force the compile (`--rerun-tasks` or after `clean`). Then run the project's
+   in Gradle's default output (`w:` lines). Gradle's warning mode can hide or cut them, including
+   when `org.gradle.warning.mode` is set in `gradle.properties` by a convention plugin or init
+   script, so the report file `build/reports/problems/problems-report.html` is the source of truth.
+   An UP-TO-DATE compile task prints none, so force the compile. Measured numbers and the full
+   procedure: [classes-errors](reference/classes-errors.md#tooling). Then run the project's
    ktlint and detekt tasks.
 5. For behaviour that no tool reports (see Gotchas), write a test with the edge value: `null`, an
    empty list, a duplicate key, a negative number, a value near `Int.MAX_VALUE`, a new enum
@@ -92,8 +87,8 @@ Basic Kotlin usage comes first; the house defaults below only fill in where thes
 
 ## House defaults
 
-The skill author's preferences. Apply them when the codebase has no convention of its own, and
-drop them when they would fight an always-on rule.
+Defaults when the codebase is silent. Apply them when the codebase has no convention of its own,
+and drop them when they would fight an always-on rule.
 
 - **Named arguments in Kotlin-to-Kotlin calls**, including constructors of data classes. Skip
   them for a single argument whose meaning is clear from the function name (`require(ok)`,
@@ -113,7 +108,7 @@ drop them when they would fight an always-on rule.
 | Task touches... | Read |
 |---|---|
 | Nullable types, `!!`, `lateinit`, Java interop and platform types, JSpecify, `@Throws`, `@JvmOverloads`, `internal` from Java, declared vs inferred types, `explicitApi`, casts and generics | [reference/types.md](reference/types.md) |
-| Collections (read-only vs immutable, duplicates, empty-collection exceptions, sequences, ranges, `getOrPut`), `when` and enums, scope functions, lambdas and `return`, ignored results, named arguments and destructuring, numbers, BigDecimal, floating point, strings, locale | [reference/idioms.md](reference/idioms.md) |
+| Collections (read-only vs immutable, duplicates, empty-collection exceptions, sequences, ranges, `getOrPut`), `when` and enums, scope functions, lambdas and `return`, ignored results, named arguments and destructuring, numbers, BigDecimal, floating point, strings, locale, blank-text checks (`isBlank`, invisible characters) | [reference/idioms.md](reference/idioms.md) |
 | Data classes (`equals`, `copy`, `toString`, arrays, private constructors), constructor parameters and properties, `object` state, extension functions, exceptions, `TODO()`, `runCatching` and cancellation, compiler options, ktlint and detekt setup | [reference/classes-errors.md](reference/classes-errors.md) |
 
 ## Gotchas
@@ -138,6 +133,8 @@ says which tool, if any, reports the problem.
   `copy()` resets it.
 - Agent puts an `Array` in a data class - `equals` compares the array references, so equal
   contents are not equal.
+- Agent gates user text with `isBlank()` - text of only NEL, zero-width or control characters passes
+  and may render as nothing. See [idioms](reference/idioms.md#strings-and-locale).
 - Agent exposes a `MutableList` as `List` - callers can cast it back and mutate the owner.
 - Agent builds a map with `associateBy` on keys that can repeat - earlier entries vanish.
 - Agent calls `list.plus(x)` or `s.trim()` and ignores the result - nothing changes; only the

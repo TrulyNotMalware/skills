@@ -1,6 +1,6 @@
 # Configuration and observability
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, caarlos0/env v11.4.1,
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, caarlos0/env v11.4.1,
 viper v1.21.0, prometheus/client_golang v1.25.0 and OpenTelemetry Go v1.47.0 (otelhttp v0.72.0),
 unless a rule carries a version tag. Nothing here fails a request: a missing setting reads as zero,
 a corrupted log line is still written, a span with no provider goes nowhere. Measured on

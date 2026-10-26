@@ -17,12 +17,14 @@ Contents: [Filter chain in Kotlin](#filter-chain-in-kotlin) ·
 ## Filter chain in Kotlin
 
 ```kotlin
+import org.springframework.core.annotation.Order
 import org.springframework.security.config.annotation.web.invoke // required for the Kotlin DSL
 
 @Configuration
 @EnableMethodSecurity
 class SecurityConfig {
     @Bean
+    @Order(1)
     fun apiChain(http: HttpSecurity): SecurityFilterChain {
         http {
             securityMatcher("/api/**")

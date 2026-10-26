@@ -1,6 +1,6 @@
 # database/sql and SQLite
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, `database/sql`,
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, `database/sql`,
 modernc.org/sqlite v1.60.1 (driver `sqlite`, SQLite 3.53.4) and goose v3.29.0 unless a rule carries
 a version tag; modernc v1.60.1 itself requires `go 1.26.0`. **database/sql** rules hold for any
 driver, **SQLite/modernc** rules for this driver only (PostgreSQL: [postgres-pgx](postgres-pgx.md)).
@@ -203,8 +203,8 @@ func ListUsers(ctx context.Context, q Querier, since time.Time, limit int) ([]Us
   inside the loop without `Close` leaked a connection per call (third call on 2 connections blocked).
   Reported by: `golangci:sqlclosecheck (opt-in)`.
 - **`defer rows.Close()` before `if err != nil`** panicked on a failed query. Reported by:
-  `staticcheck SA5001`. errcheck (standard, go-style baseline) reports every `defer rows.Close()`,
-  hence the marked line; `defer func() { _ = rows.Close() }()` also passes every linter.
+  `staticcheck SA5001`. errcheck (standard) reports every `defer rows.Close()` unless the config
+  sets `exclusions.presets: [std-error-handling]`, hence the marked line; `defer func() { _ = rows.Close() }()` also passes every linter.
 - **SQLite: inserting into the table being scanned, on the same connection**, showed the cursor its
   own inserts; the loop ran until killed.
 - **Rows handed to another function are invisible to every linter** (`go vet` reported no shape):

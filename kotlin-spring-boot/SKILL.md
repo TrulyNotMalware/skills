@@ -34,6 +34,9 @@ Verified 2026-09-28. Version-bound statements in this skill and its references a
 | Kotlin | 2.2+ (Boot minimum), 2.4.x in use | BOM default 2.3.21; libraries must end up aligned with the Kotlin plugin (see gradle-build) |
 | Build | Gradle Kotlin DSL, multi-module | |
 | Tests | Kotest 6 + MockK, SpringMockK 5 | JUnit 6 platform underneath |
+| Spring Modulith | 2.1.x | Only [modulith](reference/modulith.md) depends on it |
+| Spring Kafka | 4.1.x | Boot-managed; used in [messaging-outbox](reference/messaging-outbox.md) |
+| Testcontainers | 2.x | Boot-managed; used in [testing](reference/testing.md) |
 | Spring Cloud (gateway projects) | 2025.1.x, Gateway Server WebFlux 5.0 | Only [webflux-gateway](reference/webflux-gateway.md) depends on it (verified 2026-10-14, with Spring Security 7.1) |
 
 The project's own build files win over this table. Read `build.gradle.kts`, `settings.gradle.kts`,
@@ -51,19 +54,20 @@ anything version- or convention-related.
 3. **Verify through Spring, not around it.** Proxy, transaction, binding, and injection behavior is
    invisible to plain unit tests. When you change wiring, prove it with a Spring-context test or by
    running the app (see Gotchas).
-4. Build with `./gradlew build --console=plain` and read the Kotlin `w:` lines. Add
-   `--warning-mode all` for Gradle deprecations, but read Kotlin warnings without it: with it,
-   Gradle 9.7 rendered them as `Problem found: Kotlin compiler warning` blocks and showed only the
-   first 15. The mode may already be on through `org.gradle.warning.mode=all` in `gradle.properties`
-   (or a preset that generates it) — check first, and treat "0 `w:` lines next to problem blocks" or
-   "exactly 15 blocks" as the mode, not as the count. The complete list is in
-   `build/reports/problems/problems-report.html` (distinct `"path":…,"line":` entries); on Gradle
-   9.8.0 + KGP 2.4.10 `--warning-mode=summary` printed them nowhere on the console, so read the report
-   (with the mode set by a preset, a build carrying 16 warnings reported 0). An UP-TO-DATE compile
-   task prints no warnings; force it with `--rerun-tasks` (or after `clean`). The same applies to
-   test evidence: with `org.gradle.caching=true`, `clean build` restores unchanged `test` tasks
-   FROM-CACHE (Gradle 9.7.1), so only `--rerun-tasks` proves the tests ran now;
-   check the `build/test-results` timestamps ("Malformed input" from `:test` is a locale problem: see
+4. Build with `./gradlew build --console=plain` and read the Kotlin `w:` lines. Add `--warning-mode
+   all` for Gradle deprecations, but read Kotlin warnings without it: with it, Gradle 9.7 rendered
+   them as `Problem found: Kotlin compiler warning` blocks and showed only the first 15. The mode
+   may already be on through `org.gradle.warning.mode=all` in `gradle.properties` (or a convention
+   plugin or init script that writes `org.gradle.warning.mode`) — check first, and treat "0 `w:`
+   lines next to problem blocks" or "exactly 15 blocks" as the mode, not as the count. The complete
+   list is in `build/reports/problems/problems-report.html` (distinct `"path":…,"line":` entries);
+   on Gradle 9.8.0 + KGP 2.4.10 `--warning-mode=summary` printed them nowhere on the console, so
+   read the report (with the mode set by a convention plugin or init script, a build carrying 16
+   warnings reported 0). An UP-TO-DATE compile task prints no warnings; force it with
+   `--rerun-tasks` (or after `clean`). The same applies to test evidence: with
+   `org.gradle.caching=true`, `clean build` restores unchanged `test` tasks FROM-CACHE (Gradle
+   9.7.1), so only `--rerun-tasks` proves the tests ran now; check the `build/test-results`
+   timestamps ("Malformed input" from `:test` is a locale problem: see
    [gradle-build](reference/gradle-build.md#build-behavior-and-verification)).
 
 When **diagnosing** ("annotation does nothing", startup failure, wrong bean, binding error), gather
@@ -155,5 +159,5 @@ These are the Kotlin-specific failures that compile fine and pass unit tests.
 
 When bumping the target versions: update the table above, then grep this directory for version tags
 (`Boot 4`, `Hibernate 7`, `Jackson 3`, `Kotlin 2.`, `Spring Cloud 2025`, `Gateway Server WebFlux`,
-`Security 7.1`) and re-verify each tagged statement against the
+`Security 7.1`, `Modulith 2`, `Spring Kafka 4`, `Testcontainers 2`, `Kotest 6`) and re-verify each tagged statement against the
 official docs.

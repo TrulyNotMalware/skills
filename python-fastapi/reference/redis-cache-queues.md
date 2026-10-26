@@ -68,15 +68,15 @@ Redis = Annotated[redis.Redis, Depends(get_redis)]
 - A `socket_timeout` shorter than a blocking command's own timeout (`BLPOP ... timeout=2` with
   `socket_timeout=0.5`) raises a client-side `redis.exceptions.TimeoutError` before the server answers. Give
   blocking commands a client whose `socket_timeout` exceeds their wait, or `None`.
-- A server that is down fails at once with `ConnectionError` for a client from
-  `redis.from_url(...)` (no retries), but a client built with `redis.Redis(host=...)` retries ten
-  times with backoff first (about 4 s here). A server that is up but slow blocks a `from_url`
-  client for `socket_timeout`, and a `redis.Redis(host=...)` client for about eleven times that
-  (59 s at the defaults), because it retries timeouts too. Catch both around every cache access,
-  or the cache becomes a hard dependency; and know which constructor the project uses before
-  reasoning about latency. The exceptions are `redis.exceptions.TimeoutError` and
-  `redis.exceptions.ConnectionError`, which are **not** the builtins of the same name:
-  `except TimeoutError:` without the import catches nothing. Catch `redis.exceptions.RedisError`.
+- A server that is down fails at once with `ConnectionError` for a client from `redis.from_url(...)`
+  (no retries), but a client built with `redis.Redis(host=...)` retries ten times with backoff first
+  (about 4 s in one measurement). A server that is up but slow blocks a `from_url` client for
+  `socket_timeout`, and a `redis.Redis(host=...)` client for about eleven times that (59 s at the
+  defaults), because it retries timeouts too. Catch both around every cache access, or the cache
+  becomes a hard dependency; and know which constructor the project uses before reasoning about
+  latency. The exceptions are `redis.exceptions.TimeoutError` and
+  `redis.exceptions.ConnectionError`, which are **not** the builtins of the same name: `except
+  TimeoutError:` without the import catches nothing. Catch `redis.exceptions.RedisError`.
 - That default retry resends the **whole command**, on a lost reply and on a read timeout alike.
   When the reply is lost after the server executed it, one `incr()` call runs twice on the server
   and returns `2`; when replies are slower than `socket_timeout`, it ran eleven times and still
@@ -90,7 +90,7 @@ Redis = Annotated[redis.Redis, Depends(get_redis)]
   permanent one. `HSET`, `INCR` and other in-place updates keep the TTL.
 - `delete("user:*")` deletes nothing (a literal key named `user:*`) and returns `0`. Enumerate
   with `scan_iter("user:*")` and delete the matches; `KEYS` blocks the server (5 ms for 50k keys
-  here, seconds in a large keyspace) and is the wrong tool in a request.
+  in one measurement, seconds in a large keyspace) and is the wrong tool in a request.
 - Every cache key needs a TTL. What happens when memory runs out depends on the server, not on
   your code (Redis 8.10). The `redis:8` image starts with `maxmemory 0` (no limit) and
   `noeviction`: nothing is refused, and the keyspace grows until the container's memory limit
@@ -185,7 +185,7 @@ async def enqueue_report(report_id: str) -> str | None:
 ## Gotchas
 
 - Agent passes `socket_timeout=None` "to avoid timeouts" - requests hang forever when Redis stalls.
-- Agent runs an `arq` worker on Python 3.14 - it fails at startup.
+- Agent runs an `arq` 0.25 worker on Python 3.14 without setting an event loop first - it fails at startup.
 - Agent forgets `decode_responses` - `bytes` values, comparisons never match.
 - Agent relies on Redis to evict old cache entries - the `redis:8` image sets no `maxmemory`, so nothing is evicted and, in a container with a memory limit, Redis is OOM-killed; set `maxmemory`, and an `allkeys-*` policy only on a cache-only instance (it evicts queue and lock keys too).
 - Agent stores a model with `model_dump_json` (or `json.dumps(..., default=str)`) and reads it back with `json.loads` - datetimes and decimals come back as strings.

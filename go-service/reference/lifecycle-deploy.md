@@ -1,6 +1,6 @@
 # Lifecycle and deployment
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later and `golang.org/x/sync`
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later and `golang.org/x/sync`
 v0.24.0 unless a rule carries a version tag. Server results were measured over HTTP/1.1 (plain TCP,
 loopback, darwin/arm64) with a real listener and a raw TCP or `net/http` client; HTTP/2 was not run,
 so do not carry the tables over to it. Lifecycle code runs only at start-up, during deploys and under

@@ -39,7 +39,7 @@ when the project upgrades, re-check those first.
 | HTTP client | httpx 0.28 | Starlette 1.7 prefers `httpx2` (2.13) for `TestClient`; see testing |
 | Tests | pytest 9.1, pytest-asyncio 1.4 | anyio 4.15 underneath |
 | Auth | PyJWT 2.15, bcrypt 5.0 | passlib 1.7.4 does not work with bcrypt 5 |
-| Messaging, cache | aiokafka 0.14, redis 8.1, arq 0.25 | the arq 0.25 worker does not start on Python 3.14; arq 0.28 fixes it but requires `redis<6` |
+| Messaging, cache | aiokafka 0.14, redis 8.1, arq 0.25 | the arq 0.25 worker does not start on Python 3.14 unless a loop is set first; arq 0.28 fixes it but requires `redis<6` |
 | Tooling | ruff 0.16, mypy 2.3, uv 0.13 | |
 | Where the project uses them | Alembic 1.20, tenacity 9.2, SQLModel 0.0.48, asyncer 0.0.18 | |
 
@@ -187,5 +187,6 @@ own, longer list.
 When bumping the target versions: update the table above, then grep this directory for version tags
 (`FastAPI 0.`, `Starlette 1.`, `Pydantic 2.`, `SQLAlchemy 2.`, `Python 3.`, `pytest-asyncio`,
 `PyJWT`, `bcrypt`, `httpx2`, `aiokafka`, `redis 8`, `arq`, `ruff 0.`, `uvicorn 0.`, `fastapi-cli`,
-`uv 0.`, `Alembic`, `alembic`, `tenacity`, `SQLModel`, `sqlmodel`, `asyncer`) and re-verify
-each tagged statement by running it.
+`uv 0.`, `Alembic`, `alembic`, `tenacity`, `SQLModel`, `sqlmodel`, `asyncer`, `sse-starlette`,
+`structlog`, `prometheus-client`, `opentelemetry`, `respx`) and re-verify each tagged statement by
+running it.
