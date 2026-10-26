@@ -1,6 +1,6 @@
 # Pydantic models, request bodies, settings
 
-Applies to Pydantic 2.13, pydantic-settings 2.15, FastAPI 0.142. A `BaseModel` validates
+Applies to Pydantic 2.14, pydantic-settings 2.16, FastAPI 0.162. A `BaseModel` validates
 **input on construction** and nothing else unless configured: defaults, later assignments, and
 objects built with `model_construct()` are not checked. `BaseSettings` sets `validate_default=True`,
 so its defaults are validated and its field validators run on them; assignments are still
@@ -151,7 +151,7 @@ assert changes(ItemUpdate.model_validate({})) == {}
   response with a declared response model; `model_dump(mode="json")` keeps the `nan` float, and a
   `JSONResponse` or plain dict fails with `500`. The `null` needs the default response class: the
   same route answers `500` when it sets `response_class=JSONResponse` or the application sets
-  `default_response_class=JSONResponse` (FastAPI 0.142). To refuse non-finite values use
+  `default_response_class=JSONResponse` (FastAPI 0.162). To refuse non-finite values use
   `Field(allow_inf_nan=False)`; it acts on validation, so a returned instance built without
   validation still sends `null`.
 - A handler that returns a plain `dict` without a response model goes through
@@ -166,12 +166,14 @@ assert changes(ItemUpdate.model_validate({})) == {}
   `json.dumps` cannot encode. An empty secret dumps as `""`, not as the mask. Reading the value
   takes `.get_secret_value()`. A response model with a `SecretStr` field sends the mask.
 - A `@field_serializer("*")` on a shared base model (as popular guides suggest for one datetime
-  format) erases the types in `/openapi.json`: each field becomes `{"title": ...}`, a nested model
-  `{}`. It formats the fields of models that inherit the base; datetimes in lists and dicts, and
+  format) whose return annotation is `Any` or `object` erases the types in `/openapi.json`: each
+  field becomes `{"title": ...}`, a nested model `{}`. Without a return annotation the schema keeps
+  the field types (Pydantic 2.13 and 2.14); `-> str` types every field as a string. It formats the
+  fields of models that inherit the base; datetimes in lists and dicts, and
   in nested models that do not inherit the base, keep the default format, so one body mixes both.
   Normalize with a type alias instead. The alias below keeps `date-time` in the schema, applies
   inside lists, and sends UTC as `Z`; a `PlainSerializer(..., return_type=str)` alias also keeps
-  the type but drops `format: date-time` (FastAPI 0.142). The alias acts on validation only
+  the type but drops `format: date-time` (FastAPI 0.162). The alias acts on validation only
   (`model_construct()` skips it) and rejects naive datetimes: returning a model built from one is
   a `500`, and naive input is a `422` (`timezone_aware`).
 
@@ -207,11 +209,15 @@ class Event(BaseModel):
 - A scalar parameter next to a body model is a query parameter. `Annotated[str, Body()]` puts it
   into the body, and then the body is keyed: `{"item": {...}, "note": "n"}`. As the **only** body
   parameter, `Annotated[str, Body()]` expects a bare JSON string (`"n"`), not `{"note": "n"}`.
-- `Annotated[Item, Query()]` reads a model from the query string.
+- `Annotated[Item, Query()]` reads a model from the query string. From FastAPI 0.160, a model with
+  `extra="forbid"` also rejects the other query parameters the same handler declares: with
+  `page: int = 1` next to the model, `?limit=1&page=2` answers `422 extra_forbidden` at
+  `loc: ["query", "page"]` (`200` on 0.159). Put every query parameter of the handler on the model,
+  or leave the model at `extra="ignore"`.
 - A JSON body is parsed only when the request has a JSON content type (`application/json`, any
   `application/*+json`). With no `Content-Type`, `text/plain` or `text/json`, the request fails
   with `422` (`model_attributes_type`, "Input should be a valid dictionary or object to extract
-  fields from"), which looks like a validation problem of the payload (FastAPI 0.142).
+  fields from"), which looks like a validation problem of the payload (FastAPI 0.162).
 - JSON literals `NaN`, `Infinity` or `1e999` sent by a client for a field that rejects them (an
   `int`, a `str`) crash the `422` handler itself (the error's `input` is not JSON-serializable): the client gets `500`.
 
@@ -256,7 +262,7 @@ def get_settings() -> Settings:
   help (as popular guides suggest): the JSON decoding fails before it runs. Mark the field
   `NoDecode` to pass the raw string to the validator; the field then no longer accepts JSON: a
   JSON list is split on its commas (`["a","b"]` becomes `'["a"'` and `'"b"]'`) (pydantic-settings
-  2.15).
+  2.16).
 
 ```python
 from typing import Annotated
@@ -304,7 +310,7 @@ class Settings(BaseSettings):
   once copied to `.env`: a complex field (`list[str]`) raises `SettingsError` at startup, a
   `SecretStr | None` becomes `SecretStr('')` and the code builds a client from `""`, and a required
   password counts as set. `SettingsConfigDict(env_ignore_empty=True)` makes blank values count as unset
-  (pydantic-settings 2.15).
+  (pydantic-settings 2.16).
 - `Settings()` reads the environment at the moment it is called. A module-level
   `settings = Settings()` runs at import time, before test fixtures can set anything. Expose a
   function and inject it as a dependency ([testing](testing.md#dependency-overrides)).
@@ -332,6 +338,7 @@ class Settings(BaseSettings):
 - Agent writes `model_dump()` output to a cache or message - field names, not aliases, and not JSON-safe types.
 - Agent returns naive datetimes - serialized without offset.
 - Agent adds a second body model or a scalar parameter to a handler - the body contract changes, or the scalar becomes a query parameter.
+- Agent puts `extra="forbid"` on a `Query()` model and keeps another query parameter on the handler - from FastAPI 0.160 every request that sends that parameter is `422 extra_forbidden`.
 - Agent debugs a `422` "valid dictionary" error in the payload - the request lacks a JSON content type.
 - Agent sets `APP_ALLOWED_HOSTS=a,b` - lists are parsed as JSON.
 - Agent gives a required setting a placeholder default - a misspelled variable goes unnoticed.
@@ -339,7 +346,7 @@ class Settings(BaseSettings):
 - Agent customises a nested model's default and sets one nested variable - the other customised values revert to the nested model's defaults.
 - Agent puts a `SecretStr` field in a response model - the client receives the mask.
 - Agent sets `response_class=JSONResponse` or `default_response_class=JSONResponse` where a response model can hold `NaN` or infinity - `500` instead of `null`.
-- Agent adds a wildcard `field_serializer("*")` to a shared base model (as popular guides suggest) - every response field loses its OpenAPI type, and datetimes in lists, dicts or nested models outside the base keep the old format.
+- Agent adds a wildcard `field_serializer("*")` annotated `-> Any` to a shared base model (as popular guides suggest) - every response field loses its OpenAPI type, and datetimes in lists, dicts or nested models outside the base keep the old format.
 - Agent splits a comma-separated setting in a `mode="before"` validator without `NoDecode` - startup fails with `SettingsError`.
 - Agent appends paths to an `HttpUrl` setting with an f-string - a bare host gains a `/`; the request goes to `//path` and gets `404`.
 - Agent uses a SQLModel `table=True` model as a request body or builds one from unvalidated data - nothing is validated; wrong types and missing required fields pass silently.

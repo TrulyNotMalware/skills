@@ -1,6 +1,6 @@
 # Types, slices, maps, strings, numbers, time and JSON
 
-Applies to Go 1.27.1 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
+Applies to Go 1.27.3 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
 ([tags and labels](versions-tools.md#reported-by-vocabulary)). These produce a plausible value: a
 JSON document missing a field, two slices sharing memory, a time nine hours off.
 
@@ -161,7 +161,8 @@ Contents: [Interfaces and embedding](#interfaces-and-embedding) · [Slices](#sli
   `5 * time.Second`, or `time.Duration(n) * time.Second` for an `int` (`n * time.Second` does not
   compile). Reported by: `staticcheck SA1004` for small untyped literals only; a named constant or
   `time.Duration(secs)`: none. Do not put the unit in a `time.Duration` name (`TimeoutSecs`:
-  `staticcheck ST1011`).
+  `staticcheck ST1011`, which also covers fields, parameters and locals; `golangci:revive
+  time-naming (opt-in)` from v2.15 reports package-level vars only).
 - **`==` on `time.Time` compares the monotonic reading and the location.** For `t := time.Now()`,
   `t == t.Round(0)`, `t == t.In(time.UTC)` and `Parse(Format(t)) == t` are all false; `Equal` is
   true. The same applies to struct `==`, `reflect.DeepEqual` and map keys: normalise keys with

@@ -1,6 +1,6 @@
 # Testing FastAPI applications
 
-Applies to pytest 9.1, pytest-asyncio 1.4, httpx 0.28, FastAPI 0.142, SQLAlchemy 2.1. Follow the
+Applies to pytest 9.1, pytest-asyncio 1.4, httpx 0.28, FastAPI 0.162, SQLAlchemy 2.1. Follow the
 project's existing test style first (sync `TestClient` or async `AsyncClient`, fixture layout,
 markers). The rules below are about what each choice silently changes. Framework-free pitfalls
 (captured output, mocks and patch targets, which copy of the package is imported) are in
@@ -60,20 +60,22 @@ asyncio_default_test_loop_scope = "session"
 
 ## httpx and httpx2
 
-Starlette 1.7 builds `TestClient` on `httpx2` when it is installed and falls back to `httpx` with a
-deprecation warning. FastAPI 0.142's `standard` extra still installs `httpx`. Observed behavior is
-the same for `httpx` 0.28 and `httpx2` 2.13 in everything this file describes (redirects, lifespan,
-re-raised exceptions, 5 s default timeout, `ASGITransport`). This file uses `httpx`.
+Starlette 1.10 builds `TestClient` on `httpx2` when it is installed and falls back to `httpx` with a
+deprecation warning. FastAPI 0.142's `standard` extra installed only `httpx`; by 0.146 at the latest
+it installs `httpx` and `httpx2` both (0.162: httpx 0.28.1, httpx2 2.16.0), so a project on
+`fastapi[standard]` is in the next case by default. Observed behavior is the same for `httpx` 0.28
+and `httpx2` 2.16 in everything this file describes (redirects, lifespan, re-raised exceptions,
+5 s default timeout, `ASGITransport`). This file uses `httpx`.
 
 When **both** packages are installed, `TestClient` uses `httpx2` without any message, while
-application and test code that does `import httpx` keeps using `httpx`. The two have separate
-class hierarchies: `except httpx.HTTPError` does not catch what `TestClient` raises, and objects of
-one package are not instances of the other's types. Check `pip list` for both before relying on
+application and test code that does `import httpx` keeps using `httpx`. The two have separate class
+hierarchies: `except httpx.HTTPError` does not catch what `TestClient` raises, and objects of one
+package are not instances of the other's types. Check `pip list` for both before relying on
 exception types or `isinstance` checks in tests. With only `httpx` installed, importing
 `fastapi.testclient` emits the deprecation warning, which fails the test run in projects that set
 `filterwarnings = error`. The warning is `starlette.exceptions.StarletteDeprecationWarning`, a
-`UserWarning` subclass rather than a `DeprecationWarning` (Starlette 1.7.0): `-W error::DeprecationWarning`
-does not catch it, `-W error` does.
+`UserWarning` subclass rather than a `DeprecationWarning` (Starlette 1.10.0): `-W
+error::DeprecationWarning` does not catch it, `-W error` does.
 
 ## Choosing a client
 
@@ -84,7 +86,7 @@ does not catch it, `-W error` does.
 | Lifespan | only inside `with TestClient(app) as client:` | never |
 | Redirects | followed | **not followed** (`307` is returned) |
 | Unhandled exception in the app | re-raised in the test | re-raised in the test |
-| Streaming response | fully buffered before the call returns | fully buffered |
+| Streaming response | `get`, `post` and the like: fully buffered before the call returns; `client.stream()` yields chunks as produced (Starlette 1.9) | fully buffered |
 | WebSockets | `with client.websocket_connect(...) as ws:` (the `with` block performs the handshake; a bare call runs nothing) | not available (`404`) |
 | `Host` header / `request.client` | `testserver` / `("testclient", 50000)` | `test` from `base_url` / `("127.0.0.1", 123)` |
 
@@ -118,9 +120,14 @@ does not catch it, `-W error` does.
   sends the session cookie. A client fixture shared across tests carries a login into later tests.
   Per-request `cookies=` is deprecated (a `DeprecationWarning`, an error under
   `filterwarnings = error`); set `client.cookies` instead.
-- Neither client yields streaming chunks as they are produced: the whole body is buffered before
-  headers are available, and an endless generator hangs the test without an error. Bound the
-  generator in tests, or test the generator function directly.
+- `ASGITransport` and `TestClient.get()`/`post()` do not yield streaming chunks as they are
+  produced: the whole body is buffered before headers are available, and an endless generator hangs
+  the test without an error. From Starlette 1.9, `with client.stream("GET", url) as response:` on a
+  `TestClient` returns as soon as the headers are ready and `iter_lines()` yields chunks as the app
+  produces them; leaving the `with` block early cancels the app (the generator receives
+  `CancelledError`). An endless stream gave three lines in 0.15 s, with `httpx` and `httpx2` alike.
+  `AsyncClient` over `ASGITransport` has no such mode. Otherwise bound the generator in tests, or
+  test the generator function directly.
 
 ### Lifespan in tests
 
@@ -318,7 +325,7 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 - Agent asserts on a literal primary key - sequences survive the rollback.
 - Agent adds `-n auto` to a suite with a session-scoped schema fixture - workers collide on `create_all`/`drop_all`.
 - Agent tests an `exception_handler(Exception)` body through the default client - the exception is re-raised before the body can be asserted.
-- Agent tests an endless streaming endpoint - the client buffers the whole body and hangs.
+- Agent tests an endless streaming endpoint through `client.get()` or `ASGITransport` - the client buffers the whole body and hangs; `TestClient.stream()` (Starlette 1.9) reads chunks and cancels the app on exit.
 - Agent overrides a dependency of a mounted sub-application on the main app - the real dependency runs.
 - Agent uses a bare `TestClient(app)` with an import-time engine - the second request fails; `with` only postpones it to the second test; use `NullPool` or create the engine in `lifespan`.
 - Agent has `trio` in the environment and uses `@pytest.mark.anyio` - every test runs twice and the trio run fails.

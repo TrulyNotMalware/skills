@@ -1,7 +1,7 @@
 # Outbound HTTP with httpx
 
-Applies to httpx 0.28 (the project baseline; `httpx2` 2.13 behaves the same in what is listed here
-unless noted). An `httpx.AsyncClient` is a connection pool with a lifecycle; most mistakes come from
+Applies to httpx 0.28 (the project baseline; `httpx2` 2.16 and 2.13 behave the same in what is
+listed here unless noted). An `httpx.AsyncClient` is a connection pool with a lifecycle; most mistakes come from
 treating it like a function.
 
 Contents: [One client per process, created in lifespan](#one-client-per-process-created-in-lifespan) ·
@@ -91,8 +91,9 @@ async def whoami(session_cookie: str) -> httpx.Response:
   chunk every 0.5 s delivers a 2.5 s response under `timeout=1.0` without error, and a server that
   drips forever is never cut off. Bound the whole call with `async with asyncio.timeout(...)` when
   total latency matters.
-- **An outer deadline must not cancel requests that are queued for a pool slot** (httpx 0.28,
-  httpcore 1.0.9, HTTP/1.1). When `asyncio.timeout` or `asyncio.wait_for` cancels requests while
+- **An outer deadline must not cancel requests that are queued for a pool slot** (httpx 0.28.1,
+  httpcore 1.0.9, HTTP/1.1; `httpx2` 2.13 and 2.16 lost no slot in the same test, three runs per
+  loop). When `asyncio.timeout` or `asyncio.wait_for` cancels requests while
   others wait in the pool queue, the pool can hand the freed slots to waiting requests that are
   being cancelled too. Those connection objects never start (the pool reports them as
   `CONNECTING`; no socket is involved) and are never removed. With `max_connections=10` and a

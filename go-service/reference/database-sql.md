@@ -1,8 +1,8 @@
 # database/sql and SQLite
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, `database/sql`,
-modernc.org/sqlite v1.60.1 (driver `sqlite`, SQLite 3.53.4) and goose v3.29.0 unless a rule carries
-a version tag; modernc v1.60.1 itself requires `go 1.26.0`. **database/sql** rules hold for any
+Applies to the Go 1.27.3 toolchain with a go.mod `go` line of 1.26.0 or later, `database/sql`,
+modernc.org/sqlite v1.61.0 (driver `sqlite`, SQLite 3.54.1) and goose v3.29.0 unless a rule carries
+a version tag; modernc v1.61.0 itself requires `go 1.26.0`. **database/sql** rules hold for any
 driver, **SQLite/modernc** rules for this driver only (PostgreSQL: [postgres-pgx](postgres-pgx.md)).
 The pool opens, recycles and replaces connections on its own and SQLite compares whatever text the
 driver wrote, so settings vanish, a second connection sees another database and time comparisons go
@@ -73,7 +73,7 @@ gone after 1.5 s idle; an [interrupted query](#error-codes-statements-cancellati
 - **Put PRAGMAs in the DSN.** modernc's `newConn` ends with `applyQueryParams(c, query,
   defensiveMode)`, which runs `"pragma " + v` for each `_pragma` value on every connection the pool
   opens: three connections held at once each read `foreign_keys=1 busy_timeout=5000 synchronous=1`.
-  Shorthand keys (`_foreign_keys=1&_busy_timeout=5000`) did the same `(modernc v1.60.1)`.
+  Shorthand keys (`_foreign_keys=1&_busy_timeout=5000`) did the same `(modernc v1.61.0)`.
 - `journal_mode=WAL` persists in the file (a later DSN without keys read `wal`, `foreign_keys=0`).
   A `_pragma` value is SQL text (`foreign_keys(1);ATTACH …` ran the ATTACH): keep the DSN constant.
 - **SQLite URI keys need the `file:` prefix**: `<path>?mode=ro` opened read-write and wrote;
@@ -97,9 +97,11 @@ database. After `CREATE TABLE t` and 2 rows through `db.Exec`, `SELECT count(*) 
 - **Shared-cache names are process-wide**: a second `*sql.DB` with the same
   `file::memory:?cache=shared` (or `file:testA?mode=memory&cache=shared`) saw the first one's rows
   and its `CREATE TABLE t` failed `table t already exists`: parallel tests share one database.
-- **Shared-cache table locks wait without limit**: behind an uncommitted INSERT, another
-  connection waited 3 s for the commit, ignoring `busy_timeout(1000)` and a 500 ms ctx deadline; from
-  the goroutine holding the Tx it never returned.
+- **Shared-cache table locks ignore `busy_timeout`; only the ctx bounds them `(modernc ≥1.61)`**:
+  behind an uncommitted INSERT, another connection waited the full 3 s for the commit despite
+  `busy_timeout(1000)`; with a 500 ms ctx deadline it returned `context deadline exceeded` after
+  500 ms (3 s on v1.60.1). A call with no deadline waits for the commit, and from the goroutine
+  holding the Tx it never returns (a 500 ms ctx ended it on v1.61.0; no-deadline case not re-run).
 - **In tests use a file in `t.TempDir()`** with the production DSN:
   `OpenSQLite(t.Context(), filepath.Join(t.TempDir(), "test.db"))` ([testing](testing.md)).
 
@@ -109,16 +111,18 @@ Reported by: none — test or review.
 
 **SQLite/modernc.** One writer at a time; each pooled connection is a separate lock holder. 16
 goroutines × 50 operations on one `*sql.DB`, successes of 800 over 7 runs (counts vary from run to
-run and other runs fell slightly outside these ranges; zero versus non-zero failures never changed); the tx is `BEGIN; SELECT count(*); INSERT; COMMIT`; failures were
-`database is locked (5) (SQLITE_BUSY)` and, in WAL, `database is locked (517)`:
+run and other runs fell slightly outside these ranges; zero versus non-zero failures never changed,
+including in four runs each on v1.60.1 and v1.61.0; one machine, darwin/arm64); the tx is `BEGIN;
+SELECT count(*); INSERT; COMMIT`; failures were `database is locked (5) (SQLITE_BUSY)` and, in WAL,
+`database is locked (517)`:
 
 | configuration | rollback journal: autocommit INSERT / read-then-write tx | WAL: same |
 |---|---|---|
-| default pool, no busy_timeout | 6–18 / 0–17 | 28–69 / 36–64 |
-| `db.Exec("PRAGMA busy_timeout=5000")` | 8–82 / 12–65 | 38–130 / 36–67 |
-| DSN `_pragma=busy_timeout(5000)` | **800** / **348–565** | **800** / **20–75** |
-| DSN busy_timeout + `_txlock=immediate` | 800 / 800 (tx: 603–972 ms) | 800 / 800 (tx: 202–856 ms) |
-| `SetMaxOpenConns(1)`, no busy_timeout | 800 / 800 (tx: 210–451 ms) | 800 / 800 (tx: 67–167 ms) |
+| default pool, no busy_timeout | 6–49 / 0–30 | 28–69 / 36–64 |
+| `db.Exec("PRAGMA busy_timeout=5000")` | 8–82 / 3–65 | 35–130 / 36–67 |
+| DSN `_pragma=busy_timeout(5000)` | **800** / **259–569** | **800** / **20–416** |
+| DSN busy_timeout + `_txlock=immediate` | 800 / 800 (tx: 603–1190 ms) | 800 / 800 (tx: 202–962 ms) |
+| `SetMaxOpenConns(1)`, no busy_timeout | 800 / 800 (tx: 210–451 ms) | 800 / 800 (tx: 42–167 ms) |
 
 - **busy_timeout does not help a deferred transaction that reads, then writes.** Tx A reads,
   connection B commits an insert, A's `INSERT` fails **at once** (busy_timeout 3000): code 5 in
@@ -129,11 +133,13 @@ run and other runs fell slightly outside these ranges; zero versus non-zero fail
   `BeginTx(ctx, &sql.TxOptions{ReadOnly: true})` started at once (modernc issues a deferred `BEGIN`).
 - **modernc does not enforce `TxOptions`**: an `INSERT` in a `ReadOnly: true` tx committed;
   `LevelSerializable` and `LevelReadCommitted` were accepted without error.
-- **A ctx deadline does not cut a busy wait short**: with busy_timeout 3000 and a 300 ms ctx, a
-  blocked `INSERT` returned `context deadline exceeded` after 3.03–3.07 s. With `_txlock=immediate` a
-  blocked `BeginTx` returned `database is locked (5)` instead, also after 3.04 s. Keep busy_timeout
-  below the request deadline. `SetMaxOpenConns(1)` was fastest in every run, but it turns the next
-  section into hangs.
+- **A ctx deadline cuts a busy wait short only from modernc v1.61**: with busy_timeout 3000 and a
+  300 ms ctx, a blocked `INSERT` and a blocked `BeginTx` (with or without `_txlock=immediate`)
+  returned `context deadline exceeded` after 300 ms on v1.61.0 (`errors.Is` holds; a plain cancel
+  gave `context canceled`; the connection kept its PRAGMAs). On v1.60.1 the `INSERT` returned the
+  same error only after 3.06 s, and the `immediate` `BeginTx` returned `database is locked (5)`
+  after 3.07 s. Below v1.61 keep busy_timeout below the request deadline. `SetMaxOpenConns(1)`
+  was fastest in every run, but it turns the next section into hangs.
 
 Reported by: none — test or review.
 
@@ -277,9 +283,10 @@ store NULL, `""` an empty string. Reported by: none — test or review.
 
 **SQLite/modernc.** SQLite has no time type. modernc binds a `time.Time` as text, **by default
 `t.String()`**: `2026-10-12 09:30:15.123456789 +0900 KST`, and from `time.Now()` with the monotonic
-`m=+0.025766959` appended. Go parses it back exactly, so round-trip tests pass, while SQL
-comparisons, `ORDER BY` and date functions see only text. Input 09:30:15.123456789 KST (00:30:15Z),
-machine zone Asia/Seoul:
+`m=+0.025766959` appended (`_time_format=string_no_monotonic` `(modernc ≥1.61)`, opt-in, drops that
+suffix and changes nothing else; the default is unchanged). Go parses it back exactly, so round-trip
+tests pass, while SQL comparisons, `ORDER BY` and date functions see only text. Input
+09:30:15.123456789 KST (00:30:15Z), machine zone Asia/Seoul:
 
 | DSN keys | stored text | `Scan` into `time.Time` (DATETIME column) |
 |---|---|---|
@@ -417,7 +424,7 @@ Reported by: none — test or review.
 - Agent relies on busy_timeout for read-then-write transactions - SQLITE_BUSY at once; `_txlock=immediate` prevents it.
 - Agent adds `_txlock=immediate` and opens read transactions with `nil` options - reads queue behind writers.
 - Agent sets `TxOptions.ReadOnly` or an isolation level for modernc - neither is enforced.
-- Agent expects a short ctx to bound a busy wait - the call returns after the full busy_timeout, from `BeginTx` with `_txlock=immediate` as SQLITE_BUSY, not a ctx error.
+- Agent expects a short ctx to bound a busy wait on modernc below v1.61 - the call returns after the full busy_timeout, from `BeginTx` with `_txlock=immediate` as SQLITE_BUSY, not a ctx error.
 - Agent calls `db` inside a transaction - a hang at `MaxOpenConns(1)`, a stale read with a larger pool; an unscanned `*sql.Row` also keeps its connection.
 - Agent omits `rows.Err()` - a canceled request returns a partial list as success.
 - Agent binds `time.Time` with the default DSN or without `_timezone=UTC` - comparisons and `ORDER BY` across zones are wrong; `datetime` reads back shifted.
@@ -430,6 +437,6 @@ Reported by: none — test or review.
 ## Official sources
 
 - Package [database/sql](https://pkg.go.dev/database/sql); Go docs on [managing connections](https://go.dev/doc/database/manage-connections), [transactions](https://go.dev/doc/database/execute-transactions), [cancelling operations](https://go.dev/doc/database/cancel-operations) and [SQL injection](https://go.dev/doc/database/sql-injection)
-- [modernc.org/sqlite v1.60.1](https://pkg.go.dev/modernc.org/sqlite@v1.60.1) (DSN keys under `Driver.Open`)
+- [modernc.org/sqlite v1.61.0](https://pkg.go.dev/modernc.org/sqlite@v1.61.0) (DSN keys under `Driver.Open`)
 - SQLite: [PRAGMA foreign_keys](https://sqlite.org/pragma.html#pragma_foreign_keys), [transactions](https://sqlite.org/lang_transaction.html), [WAL](https://sqlite.org/wal.html), [in-memory databases](https://sqlite.org/inmemorydb.html), [shared cache](https://sqlite.org/sharedcache.html), [isolation](https://sqlite.org/isolation.html), [date and time functions](https://sqlite.org/lang_datefunc.html), [result codes](https://sqlite.org/rescode.html), [limits](https://sqlite.org/limits.html), [table rebuild procedure](https://sqlite.org/lang_altertable.html#otheralter)
 - [goose v3.29.0](https://pkg.go.dev/github.com/pressly/goose/v3@v3.29.0) and [gosec rules](https://github.com/securego/gosec)

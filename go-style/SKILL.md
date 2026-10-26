@@ -23,16 +23,17 @@ reports each one. Read the matching reference before writing or reviewing code i
 
 ## Target versions
 
-Verified 2026-10-08 by running code on these versions.
+Verified 2026-10-08 by running code on these versions; re-verified 2026-10-26 on go1.27.3/1.26.10,
+staticcheck 2026.2.2, golangci-lint v2.15.0, gopls v0.24.0.
 
 | Component | Baseline | Notes |
 |---|---|---|
-| Go toolchain | 1.27.1 (supported line: 1.26.8) | Older toolchains were used only for the version matrices |
-| go.mod `go` line | 1.26 | Rules for other lines are tagged; `go mod init` writes the toolchain's own version (`go 1.27.1`) |
-| staticcheck | 2026.2.1 (v0.8.1) | The CLI runs no QF checks; SA5011 no longer exists |
-| golangci-lint | v2.14.0 | Config `version: "2"`; default output hides issues |
-| gopls | v0.23.0 | `gopls check` hides hints unless `-severity=hint` |
-| govulncheck | v1.8.0 | Not probed |
+| Go toolchain | 1.27.3 (supported line: 1.26.10) | Older toolchains were used only for the version matrices |
+| go.mod `go` line | 1.26 | Rules for other lines are tagged; `go mod init` writes the toolchain's own version (`go 1.27.3`) |
+| staticcheck | 2026.2.2 (v0.8.2) | The CLI runs no QF checks; SA5011 no longer exists |
+| golangci-lint | v2.15.0 | Config `version: "2"`; default output hides issues |
+| gopls | v0.24.0 | `gopls check` hides hints unless `-severity=hint` |
+| govulncheck | v1.9.0 | Latest at re-verification; not probed |
 
 A change reaches a program through one of three gates; the version tags say which
 ([details and matrices](reference/versions-tools.md#the-three-gates)):

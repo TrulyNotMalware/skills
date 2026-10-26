@@ -1,6 +1,6 @@
 # Naming, API shape, doc comments and packages
 
-Applies to Go 1.27.1 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
+Applies to Go 1.27.3 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
 ([tags and labels](versions-tools.md#reported-by-vocabulary)). Naming and API rules rarely break a
 build; they decide whether callers can use a package without reading its source, and whether a
 later change breaks them. Where the main style guides disagree, [SKILL.md](../SKILL.md#house-defaults)
@@ -220,8 +220,9 @@ func (s Status) String() string {
 
 The zero value is a named "unknown" state, so a forgotten field is visible. Go has no exhaustive
 `switch`: a constant added later falls through silently. Reported by: `golangci:exhaustive
-(opt-in)` ("missing cases in switch of type …"). Parse external input with a function such as
-`ParseStatus(s string) (Status, error)` that returns an error for an unknown name.
+(opt-in)` ("missing cases in expression switch: …"; v2.14 said "missing cases in switch of type
+…"). Parse external input with a function such as `ParseStatus(s string) (Status, error)` that
+returns an error for an unknown name.
 
 ## Generics
 
@@ -258,7 +259,7 @@ The zero value is a named "unknown" state, so a forgotten field is visible. Go h
 | Receiver named `self`/`this` | ST1006 | ST1006 | revive receiver-naming |
 | Inconsistent receiver names | ST1016 non-default | excluded | revive receiver-naming |
 | Sentinel not `ErrX` | ST1012 | ST1012 | errname (types too), revive error-naming |
-| Duration with a unit suffix | ST1011 | ST1011 | none |
+| Duration with a unit suffix | ST1011 | ST1011 | revive time-naming (package-level vars only, v2.15+) |
 | Doc comment form | ST1020–ST1022 non-default | excluded | revive exported |
 | Missing doc on an exported name, stutter | none | none | revive exported |
 | Package comment | ST1000 non-default | excluded | revive package-comments |

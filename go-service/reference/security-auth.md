@@ -1,11 +1,11 @@
 # Security and authentication
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later,
-github.com/golang-jwt/jwt/v5 v5.3.1 and golang.org/x/crypto v0.58.0 unless a rule carries a version
-tag. Each mistake here accepts what it should reject: a token without an expiry, a password with a
-different tail, a cross-site POST, a forged client address. gosec flags most weak random sources and
-cookie attributes; nothing reported the JWT (bar errcheck on a single-value `MapClaims` assertion),
-password, comparison, CORS or client-IP pitfalls.
+Applies to the Go 1.27.1 toolchain (this file's claims were not re-run on 1.27.3) with a go.mod `go`
+line of 1.26.0 or later, github.com/golang-jwt/jwt/v5 v5.3.1 and golang.org/x/crypto v0.58.0 unless
+a rule carries a version tag. Each mistake here accepts what it should reject: a token without an
+expiry, a password with a different tail, a cross-site POST, a forged client address. gosec flags
+most weak random sources and cookie attributes; nothing reported the JWT (bar errcheck on a
+single-value `MapClaims` assertion), password, comparison, CORS or client-IP pitfalls.
 
 Contents: [Verifying JWTs](#verifying-jwts) · [Passwords](#passwords) · [Comparing secrets](#comparing-secrets) ·
 [Random tokens](#random-tokens) · [Cookies](#cookies) · [CORS and cross-origin protection](#cors-and-cross-origin-protection) ·

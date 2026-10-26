@@ -1,7 +1,7 @@
 # Versions, gates and tools
 
-Applies to the Go 1.27.1 toolchain with go.mod `go` lines from 1.21 to 1.27, staticcheck 2026.2.1,
-golangci-lint v2.14.0 and gopls v0.23.0. Every matrix below was run with those versions unless a
+Applies to the Go 1.27.3 toolchain with go.mod `go` lines from 1.21 to 1.27, staticcheck 2026.2.2,
+golangci-lint v2.15.0 and gopls v0.24.0. Every matrix below was run with those versions unless a
 row says "(docs)". Read this before trusting a "since Go 1.x" rule, a tool's silence, or a
 `go fix` rewrite.
 
@@ -23,14 +23,14 @@ part in each:
 
 Read go.mod before applying any version rule: `go` (minimum version and language version),
 `toolchain` (the toolchain `go` switches to when `GOTOOLCHAIN` allows it), and `godebug`.
-`go mod init` writes the running toolchain's full version (`go 1.27.1` on 1.27.1, `go 1.26.8` on
-1.26.8), so a new module gets the newest semantics and checks; lower the line on purpose if the
+`go mod init` writes the running toolchain's full version (`go 1.27.3` on 1.27.3, `go 1.26.10` on
+1.26.10), so a new module gets the newest semantics and checks; lower the line on purpose if the
 code must build with an older toolchain. A library cannot rely on a `(main go ≥…)` behaviour: the
 binary that imports it decides.
 
 ## Matrices
 
-**Loop variables `(go ≥1.22)`.** Same source, toolchain 1.27.1:
+**Loop variables `(go ≥1.22)`.** Same source, toolchains 1.27.3 and 1.26.10:
 
 ```go
 func counters() []func() int {
@@ -67,9 +67,9 @@ staticcheck, golangci standard and gopls were silent on the pattern alone.
 
 | main go line | toolchain | output deterministic |
 |---|---|---|
-| 1.23 | go1.23.12, go1.24.13, go1.27.1 | yes |
-| 1.24 | go1.24.13, go1.27.1 | **no** (`Seed` is a no-op) |
-| 1.24 + `GODEBUG=randseednop=0` | go1.27.1 | yes |
+| 1.23 | go1.23.12, go1.24.13, go1.26.10, go1.27.3 | yes |
+| 1.24 | go1.24.13, go1.26.10, go1.27.3 | **no** (`Seed` is a no-op) |
+| 1.24 + `GODEBUG=randseednop=0` | go1.26.10, go1.27.3 | yes |
 
 Reported by: `staticcheck SA1019` (deprecated) only; nothing says the call does nothing. For a
 reproducible sequence use a local generator:
@@ -91,21 +91,21 @@ fired but was not received:
 | toolchain | main go line | `cap(t.C)` | stale value after `Reset`/`Stop` | `Stop()` result | heap growth |
 |---|---|---|---|---|---|
 | 1.22.12 | 1.22 | 1 | yes | false | +42 MB |
-| 1.23.12, 1.26.8 | 1.22 | 1 | yes | false | +53 MB |
-| 1.23.12, 1.26.8 | 1.23 | 0 | no | **true** | 0 |
-| 1.27.1 | any | 0 | no | true | 0 |
+| 1.23.12, 1.26.8, 1.26.10 | 1.22 | 1 | yes | false | +53 MB |
+| 1.23.12, 1.26.8, 1.26.10 | 1.23 | 0 | no | **true** | 0 |
+| 1.27.1, 1.27.3 | any | 0 | no | true | 0 |
 
-On 1.23–1.26 a go.mod `godebug asynctimerchan=1` brings the old semantics back (run on 1.26.8).
-Go 1.27 removed the setting: go.mod with `asynctimerchan=1` fails to load, and
+On 1.23–1.26 a go.mod `godebug asynctimerchan=1` brings the old semantics back (run on 1.26.8 and
+1.26.10). Go 1.27 removed the setting: go.mod with `asynctimerchan=1` fails to load, and
 `GODEBUG=asynctimerchan=1` in the environment kills the binary at start-up ("removed GODEBUG"), and
 the 1.27 `go` command itself, so a CI job exporting it fails before building. Code that branches on
 `Stop()`'s result changes path, not only the drain. `staticcheck SA1015` (`time.Tick` leak) fires only for go
 lines 1.21 and 1.22 and never in package main; nothing reports `time.After` in a loop.
 
 **`slices.Delete`, `Compact`, `Replace` `(toolchain ≥1.22)`.** They now zero the tail between the
-new and the old length. A go 1.21 module built with go1.22.12 or 1.27.1: the old header after
-`Delete([1 2 3 4 5], 1, 3)` reads `[1 4 5 0 0]` (go1.21.13: `[1 4 5 4 5]`). The returned slices
-are identical; only code that keeps using the old header changes. Discarding the result as a bare
+new and the old length. A go 1.21 module built with go1.22.12, 1.26.10 or 1.27.3: the old header
+after `Delete([1 2 3 4 5], 1, 3)` reads `[1 4 5 0 0]` (go1.21.13: `[1 4 5 4 5]`). The returned
+slices are identical; only code that keeps using the old header changes. Discarding the result as a bare
 statement is reported by `vet` unusedresult; `_ =` and reading the old header: none — test or review.
 
 **Use before the error check `(toolchain ≥1.25)`.**
@@ -137,7 +137,7 @@ read through a nil pointer) panic on every toolchain. Reported by: none — test
 | 1.23 | `range` over functions (`iter.Seq`) | go line | docs |
 | 1.23 | `maps.Keys`/`Values` added, returning `iter.Seq` (`x/exp/maps` returned a slice) | toolchain (+ stdversion) | run |
 | 1.24 | `math/rand.Seed` is a no-op | main (`randseednop`) | run |
-| 1.24 | `omitzero`; `t.Context`, `b.Loop`, `strings.Lines` | toolchain | run on 1.27.1 |
+| 1.24 | `omitzero`; `t.Context`, `b.Loop`, `strings.Lines` | toolchain | run on 1.27.3 |
 | 1.24 | vet printf reports a non-constant format string with no arguments | go line | run (go 1.21: silent; go 1.26: `vet+test`) |
 | 1.25 | Delayed nil checks fixed (use-before-check panics) | toolchain | run |
 | 1.25 | `sync.WaitGroup.Go`; `testing/synctest`; vet `waitgroup` | toolchain | run |
@@ -150,7 +150,7 @@ read through a nil pointer) panic on every toolchain. Reported by: none — test
 | 1.27 | vet printf: `%w` given a `*E` where `E` implements `error` ("defeats errors.Is") | go line | run (go 1.26: silent; go 1.27: `vet+test`) |
 | 1.27 | `goroutineleak` pprof profile (1.26: `GOEXPERIMENT=goroutineleakprofile`) | toolchain | run |
 | 1.27 | Generic methods (cannot implement interface methods); struct literal keys through embedded fields | go line | run |
-| 1.27 | HTTP/1 `Response.Body.Close` drains the unread part when the body's `Content-Length` is at most 256 KiB (an unknown length is tried up to that size) and draining ends within 50 ms (source), so the connection is reused; `Close` is still required, and a larger or slower body must be read to EOF for reuse | toolchain | run: 200 KiB reused; 300 KiB (even with only 50 KiB unread) and a stalled body not; 1.26.8 only after reading to EOF |
+| 1.27 | HTTP/1 `Response.Body.Close` drains the unread part when the body's `Content-Length` is at most 256 KiB (an unknown length is tried up to that size) and draining ends within 50 ms (source), so the connection is reused; `Close` is still required, and a larger or slower body must be read to EOF for reuse | toolchain | run: 200 KiB reused; 300 KiB (even with only 50 KiB unread) and a stalled body not; 1.26.8 and 1.26.10 only after reading to EOF |
 
 Two consequences of the "go line" rows: raising the `go` line can make `go test` fail on code that
 passed (printf), and lowering it silently changes behaviour (loops, routing).
@@ -158,10 +158,10 @@ passed (printf), and lowering it silently changes behaviour (loops, routing).
 ## stdversion
 
 A module whose `go` line is older than an API it calls still compiles with a newer toolchain. A
-`go 1.24` module using `errors.AsType` (1.26) and `WaitGroup.Go` (1.25), toolchain 1.27.1: builds
+`go 1.24` module using `errors.AsType` (1.26) and `WaitGroup.Go` (1.25), toolchain 1.27.3: builds
 and runs; `vet+test stdversion` reports "errors.AsType requires go1.26 or later (module is go1.24)"
-(with go1.26.8 `go test` passed, because stdversion joined the `go test` subset in 1.27); golangci
-govet and gopls report it; staticcheck does not; `go test -vet=off` passes; building with
+(with go1.26.8 and go1.26.10 `go test` passed, because stdversion joined the `go test` subset in
+1.27); golangci govet and gopls report it; staticcheck does not; `go test -vet=off` passes; building with
 `GOTOOLCHAIN=go1.24.13` fails with `undefined: errors.AsType`. Raise the `go` line or use the older
 API. stdversion is silent in modules below go 1.21 (source), so it never reports a 1.21 API.
 

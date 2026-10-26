@@ -1,6 +1,6 @@
 # Type annotations
 
-Applies to Python 3.14, mypy 2.3, ruff 0.16. The rule of this skill is that **no annotation is
+Applies to Python 3.14, mypy 2.4, ruff 0.17. The rule of this skill is that **no annotation is
 left out**. This file gives the reasons, the modern spelling, and the places where a fully
 annotated program is still wrong.
 
@@ -55,7 +55,7 @@ def test_bump() -> None:
   `@contextmanager`/`@asynccontextmanager` is annotated as the generator it is,
   `Generator[T]`/`AsyncGenerator[T]`, not as a context manager. Current typeshed deprecates the
   `Iterator`/`AsyncIterator` overloads of both decorators: ty reports `deprecated` by default and
-  exits 1 (ty 0.0.86), pyright does in strict mode or with `reportDeprecated` on (pyright
+  exits 1 (ty 0.0.92), pyright does in strict mode or with `reportDeprecated` on (pyright
   1.1.414), ruff `UP052` flags it (preview). mypy 2.3 and 2.4 bundle older stubs and accept both
   spellings.
 - When a caller needs `close()`/`aclose()`, say so: a generator the caller wraps in
@@ -63,7 +63,7 @@ def test_bump() -> None:
   `Generator`/`AsyncGenerator`, is annotated `Generator[T]`/`AsyncGenerator[T]`.
   `Iterator`/`AsyncIterator` declare no `close`, so `closing(fn())` and `aclosing(fn())` are mypy
   `type-var` errors and `functools.partial(fn)` does not satisfy such a protocol, although the
-  code runs (mypy 2.3).
+  code runs (mypy 2.4).
 - Containers carry their type arguments: `list[str]`, `dict[str, int]`, `tuple[int, ...]`. A bare
   `list` is `list[Any]`.
 - Annotate a variable only where inference has nothing to go on: an empty container
@@ -113,7 +113,7 @@ def first[T](items: list[T]) -> T:
 - Type parameters are declared inline (Python 3.12+), as in `first`, `Node` and `Pair` above. ruff
   `UP047` flags a module-level `TypeVar` used for a generic function.
 - A default of `None` needs `| None` in the annotation. `def f(x: int = None)` is an error in
-  mypy 2.3; there is no implicit `Optional`.
+  mypy 2.4; there is no implicit `Optional`.
 - **Annotations are evaluated lazily on Python 3.14.** A class can be named in an annotation
   before it is defined, without quotes, and `from __future__ import annotations` is no longer
   needed. Do not add it to new modules.
@@ -140,10 +140,11 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 runtime-evaluated-decorators = ["pydantic.dataclasses.dataclass"]
 ```
 
-- The setting matches direct subclasses only. A model that derives from a project base class
-  (`class Price(AppModel)`) is still rewritten unless that base is listed too, and parameters of
-  functions that a framework inspects (FastAPI route handlers, dependency functions) are not
-  covered at all. Keep `TC` off for those modules.
+- The setting matches classes that ruff can trace to a listed base within one file. A model that
+  derives from a project base class defined in another module (`class Price(AppModel)`) is still
+  rewritten unless that base is listed too, while a subclass in the same module as the listed
+  class is followed. Parameters of functions that a framework inspects (FastAPI route handlers,
+  dependency functions) are not covered at all. Keep `TC` off for those modules.
 - Use `TYPE_CHECKING` to break an import cycle or to avoid an expensive import that only
   annotations need, and only where nothing evaluates the annotations at runtime.
 
@@ -283,11 +284,11 @@ def open_mode(mode: Literal["r", "w"]) -> str:
 
 ## When the project uses ty or pyright
 
-Measured with ty 0.0.86 and pyright 1.1.414 against `mypy --strict` (mypy 2.3). All three report
-a missing return, `int = None`, a misspelled `TypedDict` key, `@override` without a base method,
-a member missed before `assert_never`, `aclosing()` of an `AsyncIterator`, `Final` reassignment,
-a `NewType` mix-up, an unresolved import inside a function and an unawaited coroutine (a warning
-in ty). These differ:
+Measured with ty 0.0.92 and pyright 1.1.414 (pyright not re-run since) against `mypy --strict` (mypy
+2.4). All three report a missing return, `int = None`, a misspelled `TypedDict` key, `@override`
+without a base method, a member missed before `assert_never`, `aclosing()` of an `AsyncIterator`,
+`Final` reassignment, a `NewType` mix-up, an unresolved import inside a function and an unawaited
+coroutine (a warning in ty). These differ:
 
 - **Missing annotations.** ty has no rule for an unannotated parameter, and pyright reports one
   only in strict mode (`reportMissingParameterType`). ruff `ANN` is then the only check of this
@@ -314,14 +315,14 @@ in ty). These differ:
   `# pyright: ignore[rule]`. ruff `PGH003` flags a bare `type: ignore` and a bare
   `pyright: ignore`, not a bare `ty: ignore`; ty's `blanket-ignore-comment` is off by default.
 - **ty is 0.0.x.** Rule names and default levels change between releases; `ty explain rule` lists
-  the current ones. In 0.0.86 a warning already makes `ty check` exit 1, so `--error-on-warning`,
+  the current ones. In 0.0.92 a warning already makes `ty check` exit 1, so `--error-on-warning`,
   offered as the counterpart of `mypy --strict` (as popular guides suggest), adds no check.
 
 ## Gotchas
 
 - Agent leaves a helper or a test completely unannotated because the types are "obvious" - mypy skips its body unless `check_untyped_defs` is enabled directly or through `strict`.
 - Agent annotates an async generator as `AsyncIterator[T]` and a caller wraps it in `contextlib.aclosing` or binds it to an `AsyncGenerator` protocol - mypy `type-var`/protocol mismatch; write `AsyncGenerator[T]` when `aclose()` is part of the contract.
-- Agent annotates a `@contextmanager` function `-> Iterator[T]` - current typeshed deprecates that overload; ty fails the run (`deprecated`, ty 0.0.86) and ruff `UP052` flags it (preview); write `Generator[T]`.
+- Agent annotates a `@contextmanager` function `-> Iterator[T]` - current typeshed deprecates that overload; ty fails the run (`deprecated`, ty 0.0.92) and ruff `UP052` flags it (preview); write `Generator[T]`.
 - Agent omits `-> None` on an `__init__` that has annotated parameters - mypy `strict` accepts it, the rule of this skill does not; ruff `ANN204` reports it.
 - Agent types a decorator as `Callable[..., R]` - calls of every decorated function lose their argument checks; use `Callable[P, R]`.
 - Agent imports `ClassVar` only under `TYPE_CHECKING` - the dataclass turns the class variable into a field.

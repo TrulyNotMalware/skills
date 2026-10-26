@@ -1,6 +1,6 @@
 # HTTP server: routes, handlers and responses
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, chi v5.3.2, gin v1.12.0
+Applies to the Go 1.27.3 toolchain with a go.mod `go` line of 1.26.0 or later, chi v5.3.2, gin v1.12.0
 and echo v4.16.0 unless a rule carries a version tag; run over HTTP/1.1 on loopback (darwin/arm64).
 The mux, `ResponseWriter` and the file servers answer most mistakes with a well-formed response (a
 200 from a catch-all, a sniffed `text/html`, a dropped header, a file from outside the directory)
@@ -53,8 +53,8 @@ real mux in tests.
   | toolchain (`go` line) | `GET /dir`, only `/dir/` registered; `/a/../items/7` | `POST /dir`, Go client following |
   |---|---|---|
   | go1.25.14 (1.25) | 301 | handler got `GET`, empty body |
-  | go1.26.8, go1.27.1 (1.25 or 1.26) | 307; `/dir?q=1` → `/dir/?q=1` (go1.27.1) | handler got `POST` and the body (go1.27.1) |
-  | go1.27.1, `GODEBUG=httpmuxgo121=1` | 301; the 1.22 patterns are off | — |
+  | go1.26.10, go1.27.3 (1.25 or 1.26) | 307; `/dir?q=1` → `/dir/?q=1` (go1.27.3) | handler got `POST` and the body (go1.27.3) |
+  | go1.27.3, `GODEBUG=httpmuxgo121=1` | 301; the 1.22 patterns are off | handler got `GET`, empty body |
 
 - **`%2F` stays inside one segment and `r.PathValue` unescapes it**: `/seg/a%2Fb` matched
   `GET /seg/{id}` as `"a/b"` ([Serving files](#serving-files)). `{rest...}` matches an empty
@@ -111,7 +111,7 @@ func decodeJSON[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) (
   |---|---|---|
   | up to 256 KiB | read, connection closed | read, connection reused |
   | more, with Content-Length | not read (at most one 4 KiB buffer), closed | same |
-  | more, chunked | 256 KiB read, closed | same on go1.27.1; up to 512 KiB read on go1.26.8 |
+  | more, chunked | 256 KiB read, closed | same on go1.27.3; up to 512 KiB read on go1.26.10 |
 
   The second `Decode` can trip it too (`{"name":"a"}` plus 2 MiB of spaces): still a 413.
 - **Error kinds**: empty body → `io.EOF`; `{"name":` → `io.ErrUnexpectedEOF`; `{"n":}` →

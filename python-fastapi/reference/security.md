@@ -1,6 +1,6 @@
 # Authentication, tokens, passwords, CORS
 
-Applies to FastAPI 0.142, Starlette 1.7, PyJWT 2.15, bcrypt 5.0. Security code fails in two
+Applies to FastAPI 0.162, Starlette 1.10, PyJWT 2.15, bcrypt 5.0. Security code fails in two
 ways: loudly at a version boundary (every login breaks after an upgrade), or silently by accepting
 what it should reject. Both kinds are listed.
 
@@ -118,9 +118,11 @@ async def me(principal: CurrentPrincipal) -> Principal:
 - Router-level `dependencies=[Depends(bearer)]` cover the routes of that router only (also routes
   added to it after `include_router`). A route registered on the app or on another router is
   open. App-level `FastAPI(dependencies=[...])` covers FastAPI HTTP routes only: `/docs`,
-  `/openapi.json`, mounted sub-applications and raw Starlette routes stay open, and an
-  `HTTPBearer` dependency on the app or on a router breaks every WebSocket route under it with a
-  `500` (no `Request` to inject). Test an unauthenticated request per route
+  `/openapi.json`, mounted sub-applications and raw Starlette routes stay open. An `HTTPBearer` or
+  `OAuth2PasswordBearer` dependency on the app or on a router breaks every WebSocket route under it
+  with a `500` on FastAPI 0.142 and 0.143 (no `Request` to inject); from 0.144 a handshake without
+  an `Authorization` header is rejected with `401` and one with the header connects (0.162).
+  Test an unauthenticated request per route
   ([testing](testing.md#what-to-test-through-the-client)).
 
 ## Passwords
@@ -145,9 +147,10 @@ def verify_password(password: str, hashed: str) -> bool:
   raises the 72-byte `ValueError` for any password, because passlib's backend self-test
   (`detect_wrap_bug`) hashes an over-long secret at load. Every hash and verify call fails.
   passlib is unmaintained; call `bcrypt` (or `argon2-cffi`) directly.
-- Hashing is CPU-bound: `bcrypt` at the default cost took about 170 ms in one measurement. In an `async def`
-  handler that stalls every other request for that long; run it through `run_in_threadpool` or
-  in a `def` handler ([fastapi-basics](fastapi-basics.md#def-and-async-def-handlers)).
+- Hashing is CPU-bound: `bcrypt` at the default cost took about 250 ms in one measurement (bcrypt
+  5.0.0, Apple silicon). In an `async def` handler that stalls every other request for that long;
+  run it through `run_in_threadpool` or in a `def` handler
+  ([fastapi-basics](fastapi-basics.md#def-and-async-def-handlers)).
 - Compare API keys and signatures with `secrets.compare_digest`, not `==`; it takes two `str`
   (ASCII only) or two `bytes`, and raises `TypeError` for a mix.
 
@@ -188,8 +191,9 @@ app.add_middleware(
 ## Other headers and hosts
 
 - `TrustedHostMiddleware(allowed_hosts=[...])` rejects other `Host` headers with `400`; the match
-  is case-sensitive, ignores `X-Forwarded-Host`, and `*.example.com` does not match
-  `example.com`. Test clients send `testserver` by default
+  ignores `X-Forwarded-Host`, and `*.example.com` does not match `example.com`. It is
+  case-insensitive on Starlette 1.10 (`EXAMPLE.com` against `example.com` answers `200`) but
+  case-sensitive on 1.7 (`400`). Test clients send `testserver` by default
   ([testing](testing.md#choosing-a-client)).
 - `docs_url=None` alone leaves `/redoc` and `/openapi.json` public; use `openapi_url=None`
   ([fastapi-basics](fastapi-basics.md#routing)). The default `422` body echoes request input,
@@ -212,7 +216,7 @@ app.add_middleware(
   below behind uvicorn `--forwarded-allow-ips '*'`, rotated left-most values shared one bucket. It
   is safe only when the app is reachable through those proxies alone: a direct caller writes the
   whole header. Read `getlist`: `headers.get` returns only the first line when the client sent its
-  own header and the proxy added a second one (Starlette 1.7).
+  own header and the proxy added a second one (Starlette 1.10).
 
 ```python
 from ipaddress import ip_address
@@ -238,8 +242,9 @@ def client_ip(request: Request) -> str | None:
 
 ## Webhooks
 
-Applies to signed callbacks from a provider that retries until it gets a `2xx` (FastAPI 0.142,
-SQLAlchemy 2.1; measured with uvicorn 0.54 on SQLite and PostgreSQL 17).
+Applies to signed callbacks from a provider that retries until it gets a `2xx` (FastAPI 0.162,
+SQLAlchemy 2.1; measured with uvicorn 0.54 on SQLite and PostgreSQL 17; the PostgreSQL
+concurrency figures date from FastAPI 0.142 and were not run again).
 
 ```python
 import hashlib
@@ -428,7 +433,7 @@ async def fetch_public(url: str) -> httpx.Response:
 - Agent hashes passwords inside an `async def` handler - the process stalls per login.
 - Agent uses `HTTPBearer(auto_error=False)` and forgets the `None` case - anonymous access.
 - Agent puts auth in `APIRouter(dependencies=...)` and later adds a route on the app or another router - that route is open.
-- Agent puts `HTTPBearer` in `FastAPI(dependencies=...)` - docs and mounts stay open; WebSocket routes under it (also under a router with that dependency) break with `500`.
+- Agent puts `HTTPBearer` in `FastAPI(dependencies=...)` - docs and mounts stay open; WebSocket routes under it (also under a router with that dependency) break with `500` on FastAPI 0.142 and 0.143 and answer `401` without an `Authorization` header from 0.144.
 - Agent upgrades to bcrypt 5 - users with passwords over 72 bytes can no longer log in.
 - Agent treats `Security(dep, scopes=[...])` as enforcement - the dependency must compare scopes itself.
 - Agent sets `allow_origins=["*"]` with credentials - any origin gets credentialed access.

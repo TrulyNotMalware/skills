@@ -1,6 +1,6 @@
 # Goroutines, channels, context and sync
 
-Applies to Go 1.27.1 with a go.mod `go` line of 1.26 or later, and `golang.org/x/sync` v0.23.0 for
+Applies to Go 1.27.3 with a go.mod `go` line of 1.26 or later, and `golang.org/x/sync` v0.24.0 for
 errgroup. That x/sync version requires `go 1.26.0` (from its go.mod); older go lines pin an older
 x/sync. Tags and labels are explained in [tags and
 labels](versions-tools.md#reported-by-vocabulary). Concurrency bugs pass a quick test because the
@@ -202,7 +202,7 @@ go 1.21 and 1.22 modules and outside package main; nothing for `time.After`.
 
 ## errgroup
 
-Measured with `golang.org/x/sync` v0.23.0 (the panic row holds from v0.16.0; v0.15.0 re-panicked
+Measured with `golang.org/x/sync` v0.24.0 (the panic row holds from v0.16.0; v0.15.0 re-panicked
 in `Wait`, per its source):
 
 - `Wait` returns the first non-nil error; with `WithContext`, the other goroutines see the derived

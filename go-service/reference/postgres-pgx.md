@@ -1,13 +1,14 @@
 # PostgreSQL with pgx
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, pgx v5.11.0
-(`pgx`, `pgxpool`, `pgconn`, `pgtype`, `stdlib`) and golangci-lint v2.14 unless a rule carries a
-version tag. Every server behaviour below was measured against PostgreSQL 17.11 from darwin/arm64
-(`runtime.NumCPU()` 8); "(docs)" and "(source)" mark what was read, not run. What all
-`database/sql` drivers share is in [database-sql](database-sql.md); this file covers pgx and where
-`database/sql` + `pgx/v5/stdlib` differs. pgx fails on paths a happy test never takes: an ignored
-error discards the whole transaction at commit, an unscanned row pins a connection until shutdown
-hangs, a timeout costs a reconnect by default, and a `timestamp` column shifts by the local offset.
+Applies to the Go 1.27.1 toolchain (this file's claims were not re-run on 1.27.3) with a go.mod `go`
+line of 1.26.0 or later, pgx v5.11.0 (`pgx`, `pgxpool`, `pgconn`, `pgtype`, `stdlib`) and
+golangci-lint v2.14 unless a rule carries a version tag. Every server behaviour below was measured
+against PostgreSQL 17.11 from darwin/arm64 (`runtime.NumCPU()` 8); "(docs)" and "(source)" mark what
+was read, not run. What all `database/sql` drivers share is in [database-sql](database-sql.md); this
+file covers pgx and where `database/sql` + `pgx/v5/stdlib` differs. pgx fails on paths a happy test
+never takes: an ignored error discards the whole transaction at commit, an unscanned row pins a
+connection until shutdown hangs, a timeout costs a reconnect by default, and a `timestamp` column
+shifts by the local offset.
 
 Contents: [Choosing pgxpool or database/sql](#choosing-pgxpool-or-databasesql) · [Opening a pool](#opening-a-pool) ·
 [Errors](#errors) · [Context cancellation and timeouts](#context-cancellation-and-timeouts) ·

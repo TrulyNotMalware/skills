@@ -1,11 +1,12 @@
 # Kafka with franz-go
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later (franz-go declares
-it) and franz-go v1.22.1 (`kgo`; `kadm` v1.19.0) unless a rule carries a version tag. Measured
-against Kafka 4.3 (KRaft, 3 brokers, classic group protocol); rows marked "unreachable broker" ran
-with no broker. The client fails as duplicates, lost records and unenforced deadlines, none of
-which shows in a test that produces, consumes and closes against a healthy broker: test a crash, a
-shutdown in the middle of a poll, a second group member and a deadline shorter than the call.
+Applies to the Go 1.27.1 toolchain (this file's claims were not re-run on 1.27.3) with a go.mod `go`
+line of 1.26.0 or later (franz-go declares it) and franz-go v1.22.1 (`kgo`; `kadm` v1.19.0) unless a
+rule carries a version tag. Measured against Kafka 4.3 (KRaft, 3 brokers, classic group protocol);
+rows marked "unreachable broker" ran with no broker. The client fails as duplicates, lost records
+and unenforced deadlines, none of which shows in a test that produces, consumes and closes against a
+healthy broker: test a crash, a shutdown in the middle of a poll, a second group member and a
+deadline shorter than the call.
 
 Contents: [Producing](#producing) · [Producer contexts](#producer-contexts) ·
 [Producer shutdown](#producer-shutdown) · [Consumer offsets](#consumer-offsets) ·

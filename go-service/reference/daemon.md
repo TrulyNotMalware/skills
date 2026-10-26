@@ -1,11 +1,12 @@
 # Daemons: following files and shipping lines
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, golang.org/x/sync
-v0.24.0 (errgroup) and fsnotify v1.10.1 unless a rule carries a version tag. fsnotify ran on darwin
-(kqueue); Linux (inotify) statements come from its source and the man pages (docs). A log collector
-that loses or duplicates lines still exits 0 and passes a test that writes a file once and reads it
-once: test rotation, truncation, a stalled sink and a signal during the last flush. The code is one
-log collector: `Follow` → `Batch` → `HTTPSink.Send` → checkpoint, under an errgroup.
+Applies to the Go 1.27.1 toolchain (this file's claims were not re-run on 1.27.3) with a go.mod `go`
+line of 1.26.0 or later, golang.org/x/sync v0.24.0 (errgroup) and fsnotify v1.10.1 unless a rule
+carries a version tag. fsnotify ran on darwin (kqueue); Linux (inotify) statements come from its
+source and the man pages (docs). A log collector that loses or duplicates lines still exits 0 and
+passes a test that writes a file once and reads it once: test rotation, truncation, a stalled sink
+and a signal during the last flush. The code is one log collector: `Follow` → `Batch` →
+`HTTPSink.Send` → checkpoint, under an errgroup.
 
 Contents: [Process structure](#process-structure) · [Following a file](#following-a-file) · [Rotation](#rotation) ·
 [fsnotify](#fsnotify) · [Checkpoints](#checkpoints) · [Batching and backpressure](#batching-and-backpressure) ·

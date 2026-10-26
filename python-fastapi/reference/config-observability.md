@@ -1,7 +1,7 @@
 # Logging, metrics, tracing, health
 
 Applies to uvicorn 0.54, structlog 26, prometheus-client 0.26, OpenTelemetry SDK 1.45 with
-`opentelemetry-instrumentation-fastapi` 0.66b0. Settings themselves are in
+`opentelemetry-instrumentation-fastapi` 0.66b1. Settings themselves are in
 [pydantic-models](pydantic-models.md#settings).
 
 Contents: [Logging](#logging) · [Metrics](#metrics) · [Tracing](#tracing) ·
@@ -81,7 +81,7 @@ def configure_logging() -> None:
   middleware, read it after `call_next`, with `scope.get("route")`; it stays absent for requests
   that match no route); inside a mounted app it is the inner path without the mount prefix
   (`scope["root_path"]`); and a prefix given to `include_router(router, prefix="/v1")` is **not**
-  part of it (FastAPI 0.142), so `/v1/items/1` and `/v2/items/2` are both recorded as
+  part of it (FastAPI 0.162), so `/v1/items/1` and `/v2/items/2` are both recorded as
   `/items/{item_id}`. A prefix declared on `APIRouter(prefix=...)` is included only for
   routes declared directly on that router; the prefix of a parent router that aggregates
   sub-routers with `include_router` is lost as well. Do not rely on `route.path` for versioned
@@ -112,26 +112,27 @@ def configure_logging() -> None:
 
 ## Tracing
 
-- **FastAPI 0.142 traces natively.** As soon as a real `TracerProvider` is set, the application
-  emits spans (`GET /path`, `fastapi.dependencies`, `fastapi.endpoint`, `fastapi.serialization`)
-  without any instrumentation package. With only `OTEL_EXPORTER_OTLP_ENDPOINT` set, FastAPI
-  creates a provider and a `BatchSpanProcessor(OTLPSpanExporter)` (and an OTLP metric reader,
-  also when tracing is off) at lifespan startup, per
-  worker, flushes it at lifespan shutdown and registers an `atexit` flush. It is configured
-  through `FastAPI(telemetry={...})`, a dict with the keys `tracing`, `metrics`, `logs`,
-  `operation_spans`, `auto_configure` (read `OTEL_EXPORTER_OTLP_*` and add exporters, default
-  `True` on 0.142, see the next point), `exclude`, and
-  `tracer_provider`/`meter_provider`/`logger_provider` to use explicit providers instead of the globals. `auto_configure: False` stops the automatic exporter
-  set-up; `OTEL_SDK_DISABLED=true` disables the SDK entirely, your own provider included; `telemetry={"tracing": False}` turns request spans off.
-  `auto_configure` adds its OTLP processor **on top of** whatever the provider already has, so a
-  process whose provider is configured elsewhere exports every span twice while
+- **FastAPI traces natively** (0.142 and 0.162). As soon as a real `TracerProvider` is set, the
+  application emits spans (`GET /path`, `fastapi.dependencies`, `fastapi.endpoint`,
+  `fastapi.serialization`) without any instrumentation package. With only
+  `OTEL_EXPORTER_OTLP_ENDPOINT` set, FastAPI creates a provider and a
+  `BatchSpanProcessor(OTLPSpanExporter)` (and an OTLP metric reader, also when tracing is off) at
+  lifespan startup, per worker, flushes it at lifespan shutdown and registers an `atexit` flush. It
+  is configured through `FastAPI(telemetry={...})`, a dict with the keys `tracing`, `metrics`,
+  `logs`, `operation_spans`, `auto_configure` (read `OTEL_EXPORTER_OTLP_*` and add exporters,
+  default `True` on 0.142, see the next point), `exclude`, and
+  `tracer_provider`/`meter_provider`/`logger_provider` to use explicit providers instead of the
+  globals. `auto_configure: False` stops the automatic exporter set-up; `OTEL_SDK_DISABLED=true`
+  disables the SDK entirely, your own provider included; `telemetry={"tracing": False}` turns
+  request spans off. `auto_configure` adds its OTLP processor **on top of** whatever the provider
+  already has, so a process whose provider is configured elsewhere exports every span twice while
   `OTEL_EXPORTER_OTLP_ENDPOINT` is set; pass `auto_configure: False` there.
 - **From FastAPI 0.143 the automatic exporter set-up is opt-in.** `auto_configure` defaults to
   `False` unless `FASTAPI_OTEL_AUTO_CONFIGURE=true` is set. With only `OTEL_EXPORTER_OTLP_ENDPOINT` set,
   0.143.0 exported nothing and logged nothing, where 0.142.4 exported traces and metrics. With the
   variable set to `true` (any case) it exported again; `1` exported nothing. Passing
-  `telemetry={"auto_configure": True}` enabled it without the variable. The double export of the
-  previous point then also requires one of the two.
+  `telemetry={"auto_configure": True}` enabled it without the variable. All of this held on
+  0.162.0. The double export of the previous point then also requires one of the two.
 - `opentelemetry-instrumentation-fastapi` (`FastAPIInstrumentor.instrument_app`) is optional on
   0.142+; native tracing switches itself off when the contrib middleware is present. Where it is
   used, call it in the factory before the application handles its first event: called from
@@ -298,7 +299,7 @@ async def readyz(request: Request, response: Response) -> dict[str, str]:
 - Agent labels metrics with `request.url.path` - unbounded series.
 - Agent runs `--workers 2` with the default registry - metrics alternate between processes.
 - Agent alerts on a counter that no request has touched yet - the series does not exist.
-- Agent sets a tracer provider on FastAPI 0.142 and also adds `FastAPIInstrumentor` - native tracing turns itself off, so the `fastapi.dependencies`/`fastapi.endpoint`/`fastapi.serialization` spans disappear.
+- Agent sets a tracer provider on FastAPI 0.162 and also adds `FastAPIInstrumentor` - native tracing turns itself off, so the `fastapi.dependencies`/`fastapi.endpoint`/`fastapi.serialization` spans disappear.
 - Agent calls `instrument_app` inside `lifespan` - it does nothing, silently.
 - Agent instruments FastAPI without setting a tracer provider - no spans, no error.
 - Agent uses `SimpleSpanProcessor` in a service - an export per span on the request path.

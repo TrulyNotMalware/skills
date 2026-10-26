@@ -1,6 +1,6 @@
 # Configuration and observability
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, caarlos0/env v11.4.1,
+Applies to the Go 1.27.3 toolchain with a go.mod `go` line of 1.26.0 or later, caarlos0/env v11.4.1,
 viper v1.21.0, prometheus/client_golang v1.25.0 and OpenTelemetry Go v1.47.0 (otelhttp v0.72.0),
 unless a rule carries a version tag. Nothing here fails a request: a missing setting reads as zero,
 a corrupted log line is still written, a span with no provider goes nowhere. Measured on
@@ -122,7 +122,7 @@ func New(w io.Writer, cfg Config) (*slog.Logger, *slog.LevelVar, error) {
 				return slog.Attr{} // drop: safe for top-level built-in keys
 			}
 			if redact[strings.ToLower(a.Key)] {
-				// Replace, never drop: emptying a group corrupts the line (Go 1.22–1.27.1).
+				// Replace, never drop: emptying a group corrupts the line (Go 1.22–1.27.3).
 				return slog.String(a.Key, "[redacted]")
 			}
 			return a
@@ -157,14 +157,15 @@ ReplaceAttr returns `slog.Attr{}` for key `password` (and drops the top-level ti
 | toolchain | JSONHandler | TextHandler |
 |---|---|---|
 | go1.21.13 | `{"level":"INFO","msg":"login","req":{},"user":"ann"}` | `level=INFO msg=login user=ann` |
-| go1.22.12, 1.23.12, 1.24.13, 1.25.14, 1.26.8, 1.27.1 | `{"level":"INFO","msg":"login""user":"ann"}`: **invalid JSON** (no comma) | `level=INFO msg=login req.user=ann`: **moved into the group** |
+| go1.22.12, 1.23.12, 1.24.13, 1.25.14, 1.26.10, 1.27.3 | `{"level":"INFO","msg":"login""user":"ann"}`: **invalid JSON** (no comma) | `level=INFO msg=login req.user=ann`: **moved into the group** |
 
 - ReplaceAttr then sees `user` with `groups=["req"]`, so `len(groups) == 0` checks misfire.
   `slog.Group("g", slog.Attr{})` with nil options breaks the line the same way. A group keeping one
   member, an empty `slog.Group("req")` literal, or the emptied group as the last attribute stayed valid.
-- Cause (go1.27.1 `log/slog/handler.go` 504–523): the buffer is rolled back, the separator, key
+- Cause (go1.27.3 `log/slog/handler.go` 504–524): the buffer is rolled back, the separator, key
   prefix and group list set when the group opened are not. golang/go#81970 was fixed on the development
-  branch on 2026-10-05 for Go 1.28; no 1.27 backport found on 2026-10-12. Gate: `(toolchain 1.22–1.27.1)`.
+  branch on 2026-10-05 for Go 1.28; go1.27.3 and go1.26.10 still reproduce it, so no 1.27 backport has
+  shipped. Gate: `(toolchain 1.22–1.27.3)`.
 - **Redact by replacing the value**, as `New` does; dropping top-level built-in keys is safe. A test
   that runs `json.Valid` on every logged line catches it. Reported by: none — test or review.
 
@@ -224,8 +225,8 @@ func (h Handler) WithGroup(name string) slog.Handler {
   full wrapper above the ID lands inside the group: `"g":{"k":1,"request_id":"req-42"}`. Reported
   by: none — test or review.
 - **`slog.NewMultiHandler` `(toolchain ≥1.26)`** fans a record out; each handler keeps its own
-  level. In a `go 1.25` module it still builds with go1.27.1. Reported by: `vet+test` (stdversion:
-  `slog.NewMultiHandler requires go1.26 or later (module is go1.25)`).
+  level. In a `go 1.25` module it still builds with go1.27.3 and go1.26.10. Reported by: `vet+test`
+  (stdversion: `slog.NewMultiHandler requires go1.26 or later (module is go1.25)`).
 
 ## Secrets in logs
 
@@ -354,7 +355,7 @@ func run(ctx context.Context, exp sdktrace.SpanExporter) error {
 - Agent tags a variable `env:"X,required"` - `X=""` passes; use `notEmpty`.
 - Agent nests two config structs without `envPrefix` - both read the same unprefixed variables.
 - Agent relies on viper `AutomaticEnv` for keys that are only in the struct - `Unmarshal` leaves them zero, no error.
-- Agent drops a sensitive attribute in ReplaceAttr with `slog.Attr{}` - on Go 1.22–1.27.1 a group that loses all its members makes JSONHandler write invalid JSON.
+- Agent drops a sensitive attribute in ReplaceAttr with `slog.Attr{}` - on Go 1.22–1.27.3 a group that loses all its members makes JSONHandler write invalid JSON.
 - Agent wraps `slog.Default().Handler()` and passes it to `slog.SetDefault` - the first log call deadlocks.
 - Agent calls `log.SetOutput` after `slog.SetDefault` - `log.Printf` lines leave the structured stream.
 - Agent writes a context handler that overrides only `Handle` - `logger.With(...)` and `WithGroup(...)` drop the request ID.

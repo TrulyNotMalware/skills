@@ -25,22 +25,26 @@ cases. Read the matching reference file before editing that area.
 
 ## Target versions
 
-Verified 2026-09-30 by running code on these versions, extended 2026-10-13, 2026-10-14 and 2026-10-15.
-Version-bound statements in this skill and its references are tagged `(FastAPI 0.142)` or similar;
+Verified 2026-09-30 by running code on these versions, extended 2026-10-13, 2026-10-14 and
+2026-10-15, re-verified 2026-10-26 on FastAPI 0.162.0, Starlette 1.10.0, Pydantic 2.14.1, uvicorn
+0.54.0, SQLAlchemy 2.1.6, httpx 0.28.1, httpx2 2.16.0, pydantic-settings 2.16.1, sse-starlette 3.6.0 and
+opentelemetry-instrumentation-fastapi 0.66b1 (HTTP, ORM and server claims run; claims
+that need PostgreSQL, Kafka or a Redis server were not run again and keep their older version tags).
+Version-bound statements in this skill and its references are tagged `(FastAPI 0.162)` or similar;
 when the project upgrades, re-check those first.
 
 | Component | Baseline | Notes |
 |---|---|---|
 | Python | 3.14 | Lazy annotations (PEP 649); `asyncio.get_event_loop()` no longer creates a loop |
-| FastAPI | 0.142.x | Starlette 1.7; `Depends(scope=...)` from 0.121; native OpenTelemetry (`telemetry=`), whose exporter auto-setup needs `FASTAPI_OTEL_AUTO_CONFIGURE=true` from 0.143; fastapi-cli 0.0.32 |
-| Pydantic | 2.13.x | pydantic-settings 2.15 |
+| FastAPI | 0.162.x | Starlette 1.10; `Depends(scope=...)` from 0.121; native OpenTelemetry (`telemetry=`), whose exporter auto-setup needs `FASTAPI_OTEL_AUTO_CONFIGURE=true` from 0.143; fastapi-cli 0.0.32 |
+| Pydantic | 2.14.x | pydantic-settings 2.16 |
 | SQLAlchemy | 2.1.x async | asyncpg 0.31; `greenlet` only through the `asyncio` extra |
 | Server | uvicorn 0.54 | `--workers` spawns, it does not fork |
-| HTTP client | httpx 0.28 | Starlette 1.7 prefers `httpx2` (2.13) for `TestClient`; see testing |
+| HTTP client | httpx 0.28 | Starlette 1.10 prefers `httpx2` (2.16) for `TestClient`; `fastapi[standard]` installs both from 0.146 at the latest; see testing |
 | Tests | pytest 9.1, pytest-asyncio 1.4 | anyio 4.15 underneath |
 | Auth | PyJWT 2.15, bcrypt 5.0 | passlib 1.7.4 does not work with bcrypt 5 |
 | Messaging, cache | aiokafka 0.14, redis 8.1, arq 0.25 | the arq 0.25 worker does not start on Python 3.14 unless a loop is set first; arq 0.28 fixes it but requires `redis<6` |
-| Tooling | ruff 0.16, mypy 2.3, uv 0.13 | |
+| Tooling | ruff 0.17, mypy 2.4, uv 0.13 | |
 | Where the project uses them | Alembic 1.20, tenacity 9.2, SQLModel 0.0.48, asyncer 0.0.18 | |
 
 The project's own files win over this table. Read `pyproject.toml`, the lock or requirements files,
@@ -62,8 +66,9 @@ Check the installed versions (`pip list`), not the declared ranges.
 3. **Verify through the ASGI stack, not around it.** Dependency resolution, response filtering,
    parameter sources, and cleanup order are invisible to tests that call the handler function
    directly. Prove a change with a request through a test client.
-4. **Know what the in-process test clients hide.** They re-raise server exceptions, buffer streams,
-   run background tasks before returning, ignore timeouts and do not enforce `Content-Length`.
+4. **Know what the in-process test clients hide.** They re-raise server exceptions, buffer streams
+   (`TestClient.stream()` is the exception from Starlette 1.9), run background tasks before
+   returning, ignore timeouts and do not enforce `Content-Length`.
    For shutdown, streaming, disconnects, timeouts and anything about workers, run a real server.
 5. Run the project's linter, type checker and tests before reporting completion.
 
