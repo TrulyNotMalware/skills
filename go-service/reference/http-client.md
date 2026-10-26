@@ -1,8 +1,8 @@
 # HTTP client
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, `net/http` as the
-client and golangci-lint v2.14 for linter findings, unless a rule carries a version tag. Measured
-on go1.27.1 and go1.26.8 over HTTP/1.1 unless a row says otherwise. Every mistake here works
+Applies to the Go 1.27.3 toolchain with a go.mod `go` line of 1.26.0 or later, `net/http` as the
+client and golangci-lint v2.15 for linter findings, unless a rule carries a version tag. Measured
+on go1.27.3 and go1.26.10 over HTTP/1.1 unless a row says otherwise. Every mistake here works
 against a healthy upstream on localhost: the hang needs a silent server, the leak needs hours of
 traffic, the lost body needs a redirect or a second attempt.
 
@@ -133,22 +133,22 @@ redirect policy or pool sizes differ, or when the hosts together keep more idle 
   50 ms: a Content-Length body only when its whole length is ≤ 256 KiB, however much was already
   read (300 KiB with 100 KiB read: new connection); a chunked body when ≤ 256 KiB remain (same
   case: reused when the next GET came 50 ms or more later, in 0–26 % of runs when it followed at
-  once). Not GODEBUG-gated: a `go 1.26` module built by 1.27.1 drains. `Close` returned in under
+  once). Not GODEBUG-gated: a `go 1.26` module built by 1.27.3 drains. `Close` returned in under
   1 ms. Server connections for two sequential GETs; the at-once column is a race with the drain,
   given as the range over batches of 20 to 120 runs, and it moved with machine load:
 
-  | Body, closed without reading | go1.26.8 | go1.27.1, next GET 50 or 300 ms later | go1.27.1, next GET at once (a race) |
+  | Body, closed without reading | go1.26.10 | go1.27.3, next GET 50 or 300 ms later | go1.27.3, next GET at once (a race) |
   |---|---|---|---|
   | 1 KiB, Content-Length or chunked | new connection | reused | reused in 92–100 % of runs |
-  | 200 or 256 KiB, Content-Length or chunked | new connection | reused | new connection in most runs (reused in 0–36 %) |
+  | 200 or 256 KiB, Content-Length or chunked | new connection | reused | new connection in most runs (reused in 0–50 %) |
   | 256 KiB + 1 (length); 300 KiB (length or chunked) | new connection | new connection | new connection |
-  | 2 KiB with a 20 ms pause mid-body | new connection | reused | new connection (0 of 300 runs) |
+  | 2 KiB with a 20 ms pause mid-body | new connection | reused | new connection (0 of 30 runs on 1.27.3, 0 of 300 on 1.27.1) |
   | 2 KiB with a 100 ms pause mid-body | new connection | new connection | new connection |
   | read to EOF, never closed (1 KiB, 300 KiB) | reused | reused | reused |
 
   Twenty back-to-back GETs that closed unread bodies dialed 1–2 connections for 1 KiB, 1–3 for
   16 KiB, 2–4 for 64 KiB and 2–6 for 200 KiB on go1.27.1 (45 or more runs each), and always 20
-  on go1.26.8.
+  on go1.26.8 (not re-run on 1.27.3 or 1.26.10).
 
   ```go
   // DrainClose reads at most 64 KiB of what is left, then closes the body. A body read to
@@ -163,7 +163,7 @@ redirect policy or pool sizes differ, or when the hosts together keep more idle 
 
   With `DrainClose` the next GET, even one sent at once, reused the connection for 1 KiB and
   60 KiB bodies (length or chunked) in every run on both toolchains (20 to 170 runs per case); a
-  300 KiB body still cost a new connection, except a chunked one on 1.27.1: reused in under 1 % to 45 % of
+  300 KiB body still cost a new connection, except a chunked one on 1.27: reused in under 1 % to 45 % of
   runs (batches of 20 to 120) when the next GET followed at once, and always when it came 50 ms or
   more later (the transport drained the remaining 236 KiB). Use `defer DrainClose(resp)` after the
   error check when calls to one host follow closely or the binary may be built before 1.27. HTTP/2
@@ -308,8 +308,8 @@ Calling `Do` twice with the same `*http.Request` after the first attempt consume
 | `defer resp.Body.Close()` before the error check | `staticcheck SA5001`, `gopls:SA5001`; `vet` (httpresponse), `gopls:httpresponse` only for a `resp` straight from `http.Get`/`Client.Do`; none in a deferred closure; not `vet+test` |
 | body never closed; body read but not closed | `golangci:bodyclose (opt-in)` |
 | non-2xx early return that does not close, in a function that returns `resp` on success | none — bodyclose misses it |
-| bodies closed in a later loop over a slice; `drain(resp.Body)`, `defer drain(resp.Body)`; `drain(resp)`, `defer drain(resp)` on a `resp` from your own helper | bodyclose reports them (false positives) |
-| `drain(resp)`, `defer drain(resp)` on a `resp` from `Do`; any `drain` inside `defer func() { … }()` | silent (correct) |
+| bodies closed in a later loop over a slice; `drain(resp.Body)`, `defer drain(resp.Body)`, also on a `resp` from your own helper | bodyclose reports them (false positives) |
+| `drain(resp)`, `defer drain(resp)` on a `resp` from `Do` or from your own helper `(golangci-lint ≥2.15; v2.14 reported the helper form)`; any `drain` inside `defer func() { … }()` | silent (correct) |
 | bare `defer resp.Body.Close()` | `golangci:errcheck (standard)`, unless `exclusions.presets: [std-error-handling]` |
 | missing timeout, bare Transport, Transport per request, unbounded read, custom reader + 307, resent request | none — test or review |
 

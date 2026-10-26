@@ -1,11 +1,12 @@
 # Testing services
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, go-cmp v0.7.0,
-goleak v1.3.0, testcontainers-go v0.44.0 and modernc.org/sqlite v1.60.1 unless a rule carries a
-version tag (tags and Reported-by labels as in the go-style skill, versions-tools). A recorder
-test passes on a handler the real server answers differently, a JSON test fails on formatting and
-passes on a lost digit, and a stuck test server hangs the package until `-timeout`. Table tests,
-helpers, `t.Context()`, the result cache and synctest basics: the go-style skill, testing.
+Applies to the Go 1.27.1 toolchain (only the SQLite rows were re-run, on go1.27.3 with modernc
+v1.61.0) with a go.mod `go` line of 1.26.0 or later, go-cmp v0.7.0, goleak v1.3.0, testcontainers-go
+v0.44.0 and modernc.org/sqlite v1.61.0 unless a rule carries a version tag (tags and Reported-by
+labels as in the go-style skill, versions-tools). A recorder test passes on a handler the real
+server answers differently, a JSON test fails on formatting and passes on a lost digit, and a stuck
+test server hangs the package until `-timeout`. Table tests, helpers, `t.Context()`, the result
+cache and synctest basics: the go-style skill, testing.
 
 Contents: [The shape to aim for](#the-shape-to-aim-for) · [Recorder or server](#recorder-or-server) ·
 [Testing through the mux](#testing-through-the-mux) · [httptest.Server lifecycle](#httptestserver-lifecycle) ·
@@ -173,7 +174,7 @@ of a loopback client, so match `Timeout()`, not the message.
 
 - **`NewTestServer` in a go 1.26 module**: the 1.27 toolchain compiles it, but `go vet` and
   `go test` fail with `httptest.NewTestServer requires go1.27 or later (file is go1.26)` under a
-  `go 1.26.0` line (`module is go1.26` under `go 1.26`; `-vet=off` passes); go1.26.8 reports
+  `go 1.26.0` line (`module is go1.26` under `go 1.26`; `-vet=off` passes); go1.26.10 reports
   `undefined`. Below go 1.27, test timeouts in real time with `httptest.NewServer` outside a
   bubble. Reported by: `vet+test` (stdversion); `compiler` on a 1.26 toolchain.
 - **`httptest.NewServer` inside a bubble hangs until `-timeout`**: real network I/O does not count
@@ -186,7 +187,7 @@ of a loopback client, so match `Timeout()`, not the message.
 
 - **SQLite: a fresh file per test in `t.TempDir()`** with the production DSN and pool settings
   ([database-sql](database-sql.md) has the opener and the details). `":memory:"` is one database
-  per connection (modernc v1.60): sequential calls reuse one connection and work, but a held
+  per connection (modernc v1.61): sequential calls reuse one connection and work, but a held
   `db.Conn` or `Tx` sent the next query to an empty database (`no such table: items`), and 4
   parallel subtests failed that way in 20 to 30 of 40 per `-count=10` run, varying by run.
   `SetMaxOpenConns(1)` makes it consistent; a held `Conn` then blocks every other query. Reported

@@ -1,6 +1,6 @@
 # Streaming, SSE, WebSockets, and long-running work
 
-Applies to FastAPI 0.142, Starlette 1.7, uvicorn 0.54, sse-starlette 3.x. The common thread: once
+Applies to FastAPI 0.162, Starlette 1.10, uvicorn 0.54, sse-starlette 3.x. The common thread: once
 the response has started, the status code, the headers and the error handling are fixed, and
 whatever goes wrong afterwards is visible only in the server log.
 
@@ -14,7 +14,7 @@ Contents: [Choosing the shape](#choosing-the-shape) · [StreamingResponse](#stre
 |---|---|
 | Finishes well within client and proxy timeouts | plain response |
 | Produces output incrementally, client consumes as it arrives | returned `StreamingResponse` or a [generator endpoint](#generator-endpoints) (bytes), SSE (events) |
-| A sequence of typed records, each usable as it arrives | generator endpoint without `response_class` (and no `default_response_class`): JSON Lines, each item validated (FastAPI 0.142) |
+| A sequence of typed records, each usable as it arrives | generator endpoint without `response_class` (and no `default_response_class`): JSON Lines, each item validated (FastAPI 0.162) |
 | Long, may outlive the connection, must survive a disconnect or a restart | accept with `202` and a job id; run in a worker; expose status and a result endpoint; push progress over SSE or WebSocket if wanted |
 | Short side effect after the response (email, audit row) | `BackgroundTasks`, and only if losing it on a crash is acceptable |
 
@@ -73,11 +73,12 @@ async def export() -> StreamingResponse:
   cancellation can also be missed. Generator endpoints differ (next section).
 - `GZipMiddleware` still streams (chunks arrive as produced), but it holds status and headers back
   until the first body chunk, and it never compresses `text/event-stream`.
-- Test clients buffer the whole stream ([testing](testing.md#choosing-a-client)).
+- `TestClient.get()` and `ASGITransport` buffer the whole stream; `TestClient.stream()` does not
+  from Starlette 1.9 ([testing](testing.md#choosing-a-client)).
 
 ## Generator endpoints
 
-A handler that `yield`s instead of returning a response is streamed by FastAPI itself (FastAPI 0.142).
+A handler that `yield`s instead of returning a response is streamed by FastAPI itself (FastAPI 0.162).
 Without `response_class` it sends **JSON Lines** (`application/jsonl`), validating each item against
 the item type of the return annotation (`-> AsyncIterable[Item]`). `response_class=EventSourceResponse`
 sends SSE ([below](#server-sent-events)), and a `StreamingResponse` subclass sends the yielded bytes.
@@ -168,11 +169,11 @@ async def events(request: Request) -> EventSourceResponse:
   window; the header, or `proxy_buffering off` on that location, delivered each event at once.
   nginx hides the header from the client by default (`proxy_pass_header` passes it). Not
   measured: `proxy_cache`, HTTP/2 to the client, ingress-nginx, other proxies.
-- FastAPI 0.142 also ships its own `fastapi.sse.EventSourceResponse` and `ServerSentEvent`, with no
+- FastAPI 0.162 also ships its own `fastapi.sse.EventSourceResponse` and `ServerSentEvent`, with no
   extra dependency: declare `response_class=EventSourceResponse` and write the handler as an async
   generator that yields `ServerSentEvent(event=..., data=...)`. It sends `Cache-Control: no-cache`
   and `X-Accel-Buffering: no`, and a `: ping` comment after 15 s without an event. Differences
-  from `sse-starlette` (3.5): it has no `send_timeout` (passing one is a `TypeError`), so a client
+  from `sse-starlette` (3.6): it has no `send_timeout` (passing one is a `TypeError`), so a client
   that stops reading is not cut off; it does not end streams at shutdown (next point); and a
   generator that never awaits does not hang the server, because FastAPI awaits between events
   itself. Event ids and `Last-Event-ID` handling are your job with either. `ServerSentEvent(data=...)`
@@ -210,7 +211,7 @@ async def events(request: Request) -> EventSourceResponse:
   own `await` in every iteration** (waiting for the next event does that naturally). A generator
   that yields in a loop without awaiting is never cancelled after the client disconnects, because
   `send` no longer suspends: an endless one then spins on the event loop forever and the whole
-  process stops answering requests (sse-starlette 3.5, asyncio and uvloop). `fastapi.sse` and other
+  process stops answering requests (sse-starlette 3.6, asyncio and uvloop). `fastapi.sse` and other
   generator endpoints do not hang this way.
 
 ## WebSockets

@@ -24,17 +24,19 @@ the matching reference before writing or reviewing code in that area.
 
 ## Target versions
 
-Verified 2026-10-01 by running code on these versions, extended 2026-10-13, 2026-10-14 and 2026-10-19.
-Version-bound statements are tagged `(Python 3.14)`, `(ruff 0.16)`, `(mypy 2.3)`, `(pytest 9.1)`,
-`(ty 0.0.86)` or `(pyright 1.1.414)`.
+Verified 2026-10-01 by running code on these versions, extended 2026-10-13, 2026-10-14 and 2026-10-19,
+re-verified 2026-10-26 on ruff 0.17.2, mypy 2.4.0, ty 0.0.92 (pytest 9.1.1, Python 3.14.0; pyright
+not re-run, version unchanged).
+Version-bound statements are tagged `(Python 3.14)`, `(ruff 0.17)`, `(mypy 2.4)`, `(pytest 9.1)`,
+`(ty 0.0.92)` or `(pyright 1.1.414)`.
 
 | Component | Baseline | Notes |
 |---|---|---|
 | Python | 3.14 | Lazy annotations (PEP 649); `except A, B:` without parentheses; inline type parameters (PEP 695) are since 3.12 |
-| ruff | 0.16 | Linter and formatter; `B909` and `PLW1514` are still preview rules |
-| mypy | 2.3 | `strict = true`; no implicit `Optional` |
+| ruff | 0.17 | Linter and formatter; `B909` and `PLW1514` are still preview rules |
+| mypy | 2.4 | `strict = true`; no implicit `Optional` |
 | pytest | 9.1 | The testing reference; `unittest.mock` from the standard library |
-| ty, pyright | 0.0.86, 1.1.414 | Only where a project uses them instead of mypy; they report less by default |
+| ty, pyright | 0.0.92, 1.1.414 | Only where a project uses them instead of mypy; they report less by default |
 
 The project's own configuration wins. Read `pyproject.toml` (or `ruff.toml`, `mypy.ini`,
 `setup.cfg`) and the root `AGENTS.md`/`CLAUDE.md` first, and check `python --version` of the

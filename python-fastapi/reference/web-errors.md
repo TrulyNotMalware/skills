@@ -1,6 +1,6 @@
 # Error responses and exception handlers
 
-Applies to FastAPI 0.142 on Starlette 1.7. FastAPI has no built-in RFC 9457 problem details; the
+Applies to FastAPI 0.162 on Starlette 1.10. FastAPI has no built-in RFC 9457 problem details; the
 default error body is `{"detail": ...}` for `HTTPException` and `{"detail": [...]}` for validation
 errors. Whatever shape the project uses, the rules below decide whether an error reaches the
 client in that shape at all.

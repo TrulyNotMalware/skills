@@ -25,14 +25,18 @@ skill; use both together. Read the matching reference before editing that area.
 
 ## Target versions
 
-Verified 2026-10-12 by running code on these versions, over HTTP/1.1 on darwin/arm64. Linux-only
+Verified 2026-10-12 by running code on these versions, over HTTP/1.1 on darwin/arm64; re-verified
+2026-10-26 on go1.27.3/1.26.10, modernc.org/sqlite v1.61.0, golangci-lint 2.15.0 and staticcheck
+2026.2.2 (server timeouts, shutdown, panics, disconnect and body-limit tables, body drain, mux
+redirects, slog bug, SQLite locking, time and cancellation, lint reports). PostgreSQL, Kafka and
+Redis claims were not re-run, so pgx, franz-go and go-redis keep their earlier tags. Linux-only
 behaviour (inotify, cgroups, scratch images, systemd) is marked "(docs)" in the references.
 
 | Component | Baseline | Notes |
 |---|---|---|
-| Go toolchain | 1.27.1 (supported line: 1.26.8) | 1.27 drains small unread response bodies in the background after `Close` (reuse only once the drain ends); 1.26 sends 307 for mux redirects |
-| go.mod `go` line | 1.26.0 | x/sync v0.24.0 and modernc.org/sqlite v1.60.1 declare `go 1.26.0`, so `go mod tidy` rewrites a bare `go 1.26` |
-| SQLite | modernc.org/sqlite v1.60.1 | Driver name `sqlite`; pure Go |
+| Go toolchain | 1.27.3 (supported line: 1.26.10) | 1.27 drains small unread response bodies in the background after `Close` (reuse only once the drain ends); 1.26 sends 307 for mux redirects |
+| go.mod `go` line | 1.26.0 | x/sync v0.24.0 and modernc.org/sqlite v1.61.0 declare `go 1.26.0`, so `go mod tidy` rewrites a bare `go 1.26` |
+| SQLite | modernc.org/sqlite v1.61.0 | Driver name `sqlite`; pure Go |
 | PostgreSQL | pgx/v5 v5.11.0 | Measured against PostgreSQL 17 |
 | Auth | golang-jwt/jwt/v5 v5.3.1, x/crypto v0.58.0 | bcrypt |
 | Messaging, cache | franz-go v1.22.1, go-redis/v9 v9.23.0 | Measured against Kafka 4.3 and Redis Cluster 8 |
@@ -150,7 +154,7 @@ says which tool, if any, reports each one.
 - Agent leaves a pgx `QueryRow` unscanned or `SendBatch` unclosed - a pooled connection is held and `pool.Close()` blocks forever. See [postgres-pgx](reference/postgres-pgx.md).
 - Agent keeps franz-go's default autocommit, or closes without flushing - records are re-read after a clean restart, or dropped. See [kafka](reference/kafka.md).
 - Agent parses JWTs without `WithValidMethods` and `WithExpirationRequired` - other algorithms and tokens that never expire pass. See [security-auth](reference/security-auth.md#verifying-jwts).
-- Agent drops an attribute in slog `ReplaceAttr` with `slog.Attr{}` - on Go 1.22–1.27.1 an emptied group makes JSONHandler write invalid JSON (golang/go#81970, fixed for Go 1.28). See [config-observability](reference/config-observability.md#the-replaceattr-empty-group-bug).
+- Agent drops an attribute in slog `ReplaceAttr` with `slog.Attr{}` - on Go 1.22–1.27.3 an emptied group makes JSONHandler write invalid JSON (golang/go#81970, fixed for Go 1.28). See [config-observability](reference/config-observability.md#the-replaceattr-empty-group-bug).
 - Agent follows a log file with `bufio.Scanner` or watches the file instead of its directory - the follower stops or misses rotation with no error. See [daemon](reference/daemon.md#following-a-file).
 - Agent lets the tailer return `context.Canceled` on SIGTERM and treats `Canceled` as success - a final flush that failed exits 0 with nothing logged (or, if `main` logs every error, the log shows `context canceled` instead of the flush error). See [daemon](reference/daemon.md#process-structure).
 
@@ -161,4 +165,4 @@ When bumping versions: update the table above, then grep this directory for `too
 `modernc`, `fsnotify`, `goose`, `client_golang`, `otel`, `#81970` and re-run each tagged
 statement. Re-run the body-drain measurements first (http-server's `MaxBytesReader` table,
 http-client's body drain); they changed between 1.26 and 1.27, while the server timeout, shutdown
-and disconnect tables were identical on go1.26.8 and go1.27.1.
+and disconnect tables were identical on go1.26.10 and go1.27.3.

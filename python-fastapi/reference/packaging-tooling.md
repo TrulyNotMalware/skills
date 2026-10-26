@@ -1,6 +1,6 @@
 # Project layout, dependencies, linting, type checking, serving
 
-Applies to Python 3.14, ruff 0.16, mypy 2.3, uvicorn 0.54, uv 0.13, fastapi-cli 0.0.32. Follow
+Applies to Python 3.14, ruff 0.17, mypy 2.4, uvicorn 0.54, uv 0.13, fastapi-cli 0.0.32. Follow
 the project's existing tooling (`pip` + `requirements.txt`, `uv`, hatch, ...) rather than
 introducing another; this file lists what each tool silently does or does not check.
 
@@ -41,10 +41,13 @@ Contents: [Dependencies](#dependencies) · [Linting with ruff](#linting-with-ruf
   `uv venv`, which creates the mismatched venv. A pinned interpreter that is not installed is
   downloaded first; with `UV_PYTHON_DOWNLOADS=never` the command fails with "No interpreter
   found" instead. Set both, and pin the interpreter in the image.
-- FastAPI's `standard` extra installs `httpx` (`<1.0`, not `httpx2`), `python-multipart`,
-  `email-validator`, `uvicorn[standard]`, `pydantic-settings`, `pydantic-extra-types`, the OpenTelemetry SDK and OTLP
-  exporter, `jinja2`, and the `fastapi` CLI (`standard-no-fastapi-cloud-cli` leaves the cloud
-  CLI out). Without `python-multipart`, declaring `Form()`, `File()` or `UploadFile` raises
+- FastAPI's `standard` extra installs `httpx` (`<1.0`) and, since 0.146 at the latest, `httpx2`
+  as well (0.142 had `httpx` only), so `TestClient` uses `httpx2`
+  ([testing](testing.md#httpx-and-httpx2)). It also installs `python-multipart`,
+  `email-validator`, `uvicorn[standard]`, `pydantic-settings`, `pydantic-extra-types`, the
+  OpenTelemetry SDK and OTLP exporter, `jinja2`, and the `fastapi` CLI
+  (`standard-no-fastapi-cloud-cli` leaves the cloud CLI out). Without `python-multipart`,
+  declaring `Form()`, `File()` or `UploadFile` raises
   `RuntimeError: Form data requires "python-multipart"` at route decoration, at import time.
   `uvicorn` without `[standard]` starts without complaint, but a WebSocket upgrade is served as
   plain HTTP with only a warning (`No supported WebSocket library detected`).
@@ -65,7 +68,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "ANN", "ASYNC", "FAST", "RUF006", "T2
   `**kwargs` (`ANN002`, `ANN003`), and every return type including `-> None` on `__init__`
   (`ANN201`-`ANN206`), in tests and fixtures too. It also flags `Any` (`ANN401`); keep that on and
   silence it per line where `Any` is really meant. `ANN` and mypy overlap but neither replaces the
-  other (ruff 0.16, mypy 2.3): mypy `strict` accepts `def __init__(self, x: int):` without
+  other (ruff 0.17, mypy 2.4): mypy `strict` accepts `def __init__(self, x: int):` without
   `-> None`, and ruff accepts bare `list` and `dict`, which mypy rejects as missing type
   arguments. Run both.
 
@@ -77,7 +80,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "ANN", "ASYNC", "FAST", "RUF006", "T2
 - `FAST002` flags `Depends()`/`Query()`-style defaults declared without `Annotated`; `FAST003` flags a path parameter
   missing from the handler signature (the route works and the value is silently ignored).
   `FAST001` (redundant `response_model`) does **not** fire under `target-version = "py314"` or
-  with `from __future__ import annotations` in ruff 0.16; do not rely on it.
+  with `from __future__ import annotations` in ruff 0.17; do not rely on it.
 - `RUF006` flags `asyncio.create_task(...)` whose result is discarded
   ([asyncio-concurrency](asyncio-concurrency.md#tasks-and-ownership)).
 - ruff does not know about per-request `httpx.AsyncClient()`, sessions shared across tasks,

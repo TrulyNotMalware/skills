@@ -1,6 +1,6 @@
 # Lifecycle and deployment
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later and `golang.org/x/sync`
+Applies to the Go 1.27.3 toolchain with a go.mod `go` line of 1.26.0 or later and `golang.org/x/sync`
 v0.24.0 unless a rule carries a version tag. Server results were measured over HTTP/1.1 (plain TCP,
 loopback, darwin/arm64) with a real listener and a raw TCP or `net/http` client; HTTP/2 was not run,
 so do not carry the tables over to it. Lifecycle code runs only at start-up, during deploys and under
@@ -292,8 +292,9 @@ sends the request, waits 0.5 s and goes away (HTTP/1.1, darwin):
   roots (forced on darwin by `GODEBUG=x509usefallbackroots=1`: 120 roots, a public host verified,
   +167 KB). darwin found its zone database even with `ZONEINFO` empty. Reported by: none — test or review.
 - **On darwin (and Windows, docs) `SSL_CERT_FILE` counts only with main go ≥1.27** (GODEBUG
-  `x509sslcertoverrideplatform`): go1.27.1 ignored it for a go 1.26 module unless the GODEBUG was 1,
-  and used it for a go 1.27 one; go1.26.8 ignored it at every setting. Reported by: (docs) + run.
+  `x509sslcertoverrideplatform`): go1.27.3 ignored it for a go 1.26 module unless the GODEBUG was 1,
+  and used it for a go 1.27 one; go1.26.10 ignored it for a go 1.26 module at both settings.
+  Reported by: (docs) + run.
 - **Build info depends on how the binary was built** (`debug.ReadBuildInfo`). `go build` in a
   repository sets `vcs.revision`, `vcs.modified` and `Main.Version`: the tag, a pseudo-version, or
   `…+dirty` with any modified or untracked, not git-ignored file (a binary the last build wrote there:

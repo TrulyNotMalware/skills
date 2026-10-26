@@ -1,6 +1,6 @@
 # Testing with pytest and unittest.mock
 
-Applies to Python 3.14, pytest 9.1, ruff 0.16, mypy 2.3. Framework-free; for FastAPI clients,
+Applies to Python 3.14, pytest 9.1, ruff 0.17, mypy 2.4. Framework-free; for FastAPI clients,
 lifespan, async and database fixtures, see the testing reference of the python-fastapi skill. Most
 pitfalls here are reported by **nothing**: the test passes.
 
@@ -97,12 +97,12 @@ def test_pay_prints_nothing(
   swallows it (`AssertionError` is an `Exception`) and the test passes. ruff `BLE001` reports that
   handler when it passes, returns, stores the exception or logs it without the traceback, and not
   when it logs with `logger.exception` or `exc_info=True`, which swallows it all the same (ruff
-  0.16). Check afterwards with `mock.assert_not_called()` or `mock.call_count == 0`, which read the
+  0.17). Check afterwards with `mock.assert_not_called()` or `mock.call_count == 0`, which read the
   recorded calls.
 
 - `create_autospec(...)` is typed as returning `Any` (typeshed), so returning it straight from an
   annotated fixture or helper (`-> MagicMock`, `-> NonCallableMagicMock`, `-> PaymentClient`) is
-  mypy `no-any-return` under `strict` (mypy 2.3). Bind it to an annotated local first
+  mypy `no-any-return` under `strict` (mypy 2.4). Bind it to an annotated local first
   (`mock: MagicMock = create_autospec(PaymentClient, instance=True)` and `return mock`) or `cast`
   it. `MagicMock(spec=PaymentClient)` is typed `MagicMock` and passes as is, but checks only
   attribute names, not call signatures.
@@ -146,7 +146,7 @@ package installed from a wheel and the source edited afterwards (pytest 9.1):
   checking `tests` as a directory without `explicit_package_bases`, it finds any module that
   another file imports as `tests.x` under two names (`x` and `tests.x`, `conftest` or a helper
   module alike), stops at `Source file found twice under different module names` and checks
-  nothing else (mypy 2.3); a single-file target passes. `tests/__init__.py` fixes both (with the
+  nothing else (mypy 2.4); a single-file target passes. `tests/__init__.py` fixes both (with the
   package at the repository root, `pytest` then imports the source tree, table above);
   `explicit_package_bases = true` fixes mypy only.
 

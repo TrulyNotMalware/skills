@@ -1,6 +1,6 @@
 # Tests and benchmarks
 
-Applies to Go 1.27.1 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
+Applies to Go 1.27.3 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
 ([tags and labels](versions-tools.md#reported-by-vocabulary)). The examples use only the standard
 library and `github.com/google/go-cmp`; in a codebase that uses testify, keep testify and apply the
 same rules about messages and helpers. A green `go test` can mean the test was cached, ran only

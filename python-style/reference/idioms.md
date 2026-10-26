@@ -1,6 +1,6 @@
 # Idioms and silent pitfalls
 
-Applies to Python 3.14 and ruff 0.16. Each pitfall names what reports it: a ruff rule, mypy, or
+Applies to Python 3.14 and ruff 0.17. Each pitfall names what reports it: a ruff rule, mypy, or
 **nothing**. The ones marked "nothing" need review and tests, because the code runs and returns
 a plausible value.
 
@@ -129,7 +129,7 @@ def pairs(names: list[str], ages: list[int]) -> dict[str, int]:
   `rstrip(".csv")` is not reported.
 - Two string literals next to each other are joined: `["a", "b" "c"]` has two elements. A missing
   comma in a list is therefore silent at runtime. ruff `ISC001` (one line) and `ISC004` (in a
-  collection) report it only until the file is rewritten (ruff 0.16): `ruff format` merges the pair
+  collection) report it only until the file is rewritten (ruff 0.17): `ruff format` merges the pair
   into one literal when it fits the line, `ruff check --fix` merges a one-line pair (the `ISC001`
   fix is safe), `--unsafe-fixes` wraps it in parentheses, and then nothing reports it. Read
   `ruff check` without `--fix` first ([structure](structure.md#tooling)).
@@ -146,7 +146,9 @@ def pairs(names: list[str], ages: list[int]) -> dict[str, int]:
   comparison with NaN written into it (`float("nan")`, `math.nan`), not one with a parsed value.
 - `datetime.now()` and `datetime.utcnow()` return naive values; `utcnow` is deprecated. Use
   `datetime.now(UTC)`. Comparing a naive with an aware value with `<` raises `TypeError`, but
-  `==` just returns `False`. ruff `DTZ` reports the naive constructors.
+  `==` just returns `False`. ruff `DTZ` reports the naive constructors; since ruff 0.17 the default
+  rule set no longer includes `datetime.now()` and `date.today()` (`DTZ005`, `DTZ011`), so select
+  `DTZ`.
 - Aware values in the **same** zone are compared and subtracted by their wall-clock fields. The
   two `01:30` of a daylight-saving change in `ZoneInfo("America/New_York")` (`fold=0` and
   `fold=1`) are equal and zero seconds apart, although they are one hour apart in UTC. Convert
@@ -219,8 +221,8 @@ def parse_port(raw: str) -> int:
 - A list of arguments prevents shell injection, not option injection: an outside value that starts
   with `-` is read as an option (given `--output=x.txt` as a path, `git diff --no-index` writes
   `x.txt`). Put `--` before positional arguments when the command supports it, or reject values
-  that start with `-`. **Nothing** reports it; ruff `S603` flags every call alike, with or without
-  `--`.
+  that start with `-`. **Nothing** reports it; ruff `S603` flags every call whose arguments are not
+  all literals alike, with or without `--`, and skips a call written entirely with literals.
 - Open files, locks, sockets and temporary directories with `with`. ruff `SIM115` reports an
   `open()` outside one.
 - In a `@contextmanager` (or `@asynccontextmanager`) generator, code after a `yield` that is not

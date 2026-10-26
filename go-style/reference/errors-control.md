@@ -1,6 +1,6 @@
 # Errors and control flow
 
-Applies to Go 1.27.1 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
+Applies to Go 1.27.3 with a go.mod `go` line of 1.26 or later unless a rule carries a version tag
 ([tags and labels](versions-tools.md#reported-by-vocabulary)). These mistakes lose or misclassify an
 error only on the failure path, which a quick manual test never takes: test each error path.
 
@@ -97,7 +97,9 @@ sentinel is matched with `errors.Is` and the type with `errors.AsType` (`errors.
 - **`%w` with a pointer to a value-receiver error `(go ≥1.27)`.** `fmt.Errorf("op: %w", &E{})`
   where `E` implements `error`: callers matching `errors.Is(err, E{})` never match. Reported by:
   `vet+test` printf "defeats errors.Is", only in files whose `go` line is 1.27 or later, so raising
-  the `go` line makes `go test` fail on existing code.
+  the `go` line makes `go test` fail on existing code. `gopls:` (v0.24) also warns at the type
+  ("both E and *E implement the error interface, making the intent ambiguous") and where both
+  conversions to `error` occur ("E is converted to error both as a value and as a pointer").
 
 ## Sentinels, types and messages
 

@@ -1,6 +1,6 @@
 # Naming, modules, errors, logging and tooling
 
-Applies to Python 3.14, ruff 0.16, mypy 2.3. Layout and formatting are the formatter's job
+Applies to Python 3.14, ruff 0.17, mypy 2.4. Layout and formatting are the formatter's job
 (`ruff format`); this file covers what a formatter cannot decide. The project's existing
 conventions win over everything here.
 
@@ -27,8 +27,9 @@ Contents: [Naming](#naming) Â· [Functions and classes](#functions-and-classes) Â
 - **Do not name a module after a standard-library or dependency module** (`random.py`,
   `logging.py`, `queue.py`). Other imports of that name then get your file: `AttributeError:
   module 'random' has no attribute 'randint'` (on Python 3.14 the message suggests renaming the
-  file). Modules the interpreter has already loaded at startup, such as `types`, are not
-  affected at runtime, but the name is still confusing. ruff `A005` reports the standard-library
+  file). Modules the interpreter has already loaded at startup (`os`, `abc`, `codecs`, `io`; not
+  `types`, `enum` or `typing` on Python 3.14.0) are not affected at runtime, but the name is still
+  confusing. ruff `A005` reports the standard-library
   names; nothing reports a dependency name.
 - A name with a leading underscore is private to its module or class. Do not import or call it
   from elsewhere, and do not use double leading underscores (name mangling) for privacy.
@@ -120,7 +121,7 @@ if __name__ == "__main__":
 - Catch bare `Exception` only at an isolation boundary: one item of a batch, one message in a
   worker loop, the outermost frame of a thread. Record the failure with its traceback
   (`logger.exception(...)` or `exc_info=True`) and continue; everywhere else catch the specific
-  exception. ruff `BLE001` (ruff 0.16) accepts a handler that re-raises or logs with
+  exception. ruff `BLE001` (ruff 0.17) accepts a handler that re-raises or logs with
   `logger.exception` or `exc_info=True`, and reports one that only does `pass`, `continue` or
   stores the exception, or logs with `logger.error(...)` or `logger.warning("%s", e)` and no
   traceback. It also accepts a re-raise or log inside one `if` branch while the other branch
@@ -162,7 +163,7 @@ class RateLimitError(ApiError):
   Pass `stacklevel=2` (ruff `B028`), and use `FutureWarning`, shown by default, for a change end
   users must notice at runtime. mypy reports calls to `@deprecated` functions, typeshed's included
   (`datetime.utcnow`), only with the `deprecated` error code, which `strict` does not enable
-  (mypy 2.3); the configuration below enables it.
+  (mypy 2.4); the configuration below enables it.
 - The details are in [idioms](idioms.md#exceptions).
 
 ## Logging
@@ -253,9 +254,10 @@ enable_error_code = ["ignore-without-code", "deprecated"]
   `requires-python` is lower, each tool needs the floor separately. mypy checks against the
   interpreter it runs under and pyright against the Python it finds (`python` on `PATH`, or
   `--pythonpath`); neither reads `requires-python`, so set mypy `python_version` and pyright
-  `pythonVersion` to the floor. ty reads `requires-python` (ty 0.0.86). ruff takes its target from
-  `requires-python` unless `target-version` is set; with a higher `target-version` its unsafe `UP`
-  fixes write `type X = ...` and `def f[T]`, which the floor cannot parse. ruff does not check
+  `pythonVersion` to the floor. ty reads `requires-python` (ty 0.0.92). ruff takes its target from
+  `requires-python` unless `target-version` is set (3.11 when neither is, since ruff 0.17); with a
+  higher `target-version` its unsafe `UP` fixes write `type X = ...` and `def f[T]`, which the
+  floor cannot parse. ruff does not check
   standard-library APIs against the floor (`itertools.batched` on 3.11); mypy and pyright with the
   floor set, and ty, do.
 - `# noqa: CODE` and `# type: ignore[code]` always carry the code and, when it is not obvious, a

@@ -1,11 +1,11 @@
 # Redis with go-redis
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later (go-redis declares
-it) and go-redis v9.23.0 unless a rule carries a version tag. Measured against Redis Cluster 8.10
-(6 nodes) through `redis.ClusterClient`. These mistakes surface as a miss that is really an error,
-a deadline that is not enforced, a key that never expires and a command that fails only on the
-cluster, none of which shows in a test against one healthy node: test a deadline shorter than the
-command, an exhausted pool and keys in different slots.
+Applies to the Go 1.27.1 toolchain (this file's claims were not re-run on 1.27.3) with a go.mod `go`
+line of 1.26.0 or later (go-redis declares it) and go-redis v9.23.0 unless a rule carries a version
+tag. Measured against Redis Cluster 8.10 (6 nodes) through `redis.ClusterClient`. These mistakes
+surface as a miss that is really an error, a deadline that is not enforced, a key that never expires
+and a command that fails only on the cluster, none of which shows in a test against one healthy
+node: test a deadline shorter than the command, an exhausted pool and keys in different slots.
 
 Contents: [Redis client and redis.Nil](#redis-client-and-redisnil) · [Deadlines and the pool](#deadlines-and-the-pool) ·
 [TTLs and locks](#ttls-and-locks) · [Cluster slots](#cluster-slots) · [Gotchas](#gotchas)

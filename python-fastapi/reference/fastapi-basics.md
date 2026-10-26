@@ -1,6 +1,6 @@
 # FastAPI basics: app, dependencies, routing, threads
 
-Applies to FastAPI 0.142 on Starlette 1.7 and Python 3.14. Statements tagged with a version were
+Applies to FastAPI 0.162 on Starlette 1.10 and Python 3.14. Statements tagged with a version were
 observed on that version; re-check them when the project is on an older release.
 
 Contents: [Application and lifespan](#application-and-lifespan) · [Dependencies](#dependencies) ·
@@ -50,10 +50,10 @@ def create_app() -> FastAPI:
   router has no application of its own.
 - **`lifespan` and `@app.on_event` do not combine.** When `lifespan=` is passed, handlers registered
   with `@app.on_event("startup")`/`("shutdown")` are never called, with no error or warning about
-  it (FastAPI 0.142). Handlers registered on an included `APIRouter` (`@router.on_event`) still
+  it (FastAPI 0.162). Handlers registered on an included `APIRouter` (`@router.on_event`) still
   run, so a half-migrated application runs some of its startup code and not the rest. Without
   `lifespan`, `@app.on_event` handlers run once, but `@router.on_event` handlers of an included
-  router run **twice** per startup and shutdown (FastAPI 0.142). The deprecation warning is
+  router run **twice** per startup and shutdown (FastAPI 0.162). The deprecation warning is
   visible under pytest but not in the log of `uvicorn module:app`. Move every handler into
   `lifespan` when migrating.
 - Lifespan runs once **per process**. With several workers, each worker has its own clients, caches
@@ -111,7 +111,7 @@ async def me(user: CurrentUser) -> dict[str, str]:
 ### Dependencies with `yield`
 
 Code after the `yield` runs **after the response has been sent and after background tasks**
-(default `scope="request"`, FastAPI 0.142):
+(default `scope="request"`, FastAPI 0.162):
 
 ```text
 dependency enter -> handler returns -> response sent -> background tasks -> dependency exit
@@ -139,7 +139,7 @@ Consequences:
   with `database is locked` after 5 s until then. A body that calls `await session.commit()` itself
   persists and returns the connection (SQLAlchemy 2.1, aiosqlite).
 - A default-scope dependency with `yield` cannot depend on a `scope="function"` one: the route
-  definition raises `DependencyScopeError` (FastAPI 0.142). A plain dependency without `yield` (a
+  definition raises `DependencyScopeError` (FastAPI 0.162). A plain dependency without `yield` (a
   repository factory) can, and the check does not look through it: a request-scoped `yield`
   dependency that reaches the function-scoped session that way starts fine, and its exit code runs
   after the session is already closed.
@@ -218,7 +218,7 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   vs `/items/{item_id}`), which metrics use as a label (a prefix on a parent router that aggregates
   sub-routers is lost either way)
   ([config-observability](config-observability.md#metrics)).
-- `app.frontend("/", directory="dist")` (FastAPI 0.142) serves a built frontend behind all API
+- `app.frontend("/", directory="dist")` (FastAPI 0.162) serves a built frontend behind all API
   routes, with an `index.html` fallback for any unknown `GET` whose `Accept` includes `text/html`.
   A browser opening a mistyped API URL therefore gets `200` and the app page; a client sending
   `application/json` or `*/*` gets `404`. Its default `fallback="auto"` prefers a `404.html` from
@@ -240,8 +240,8 @@ Session and transaction rules are in [sqlalchemy-async](sqlalchemy-async.md#tran
   (return annotation or `response_model=`; not with `response_model=None`): one that mutates is
   applied twice (`"Dr. Dr. Kim"`, a list appended twice), and an invariant check turns a mutated
   instance into a `500`. Field validators and `mode="before"` validators do not run again. Returned
-  dicts and ORM objects are validated (a dict's `after` validator ran once; Pydantic 2.13, FastAPI 0.142).
-- `ORJSONResponse` and `UJSONResponse` are deprecated (FastAPI 0.142); the first response through
+  dicts and ORM objects are validated (a dict's `after` validator ran once; Pydantic 2.14, FastAPI 0.162).
+- `ORJSONResponse` and `UJSONResponse` are deprecated (FastAPI 0.162); the first response through
   one logs a `FastAPIDeprecationWarning`, visible under `uvicorn module:app`. Any non-default
   `response_class` or `default_response_class` also skips FastAPI's direct Pydantic-to-JSON path
   (from source): with a return type, a `NaN` field is `null` by default but a `500` with
@@ -303,7 +303,7 @@ took 1.5 s in total (serialized), `time.sleep` in `def` 0.3 s, `await asyncio.sl
   That includes the handler itself: a context variable set by a `def` dependency is unset in the
   handler that depends on it. Set request context in `async def` dependencies or middleware.
 - A value set inside the handler is not visible to a `BaseHTTPMiddleware` after `call_next`
-  (the handler runs in a separate task; verified on Starlette 1.7). A pure ASGI middleware does see
+  (the handler runs in a separate task; verified on Starlette 1.10). A pure ASGI middleware does see
   it. Prefer pure ASGI middleware when request-scoped context must flow both ways.
 - Background tasks see the context as it was at the end of an `async def` handler. Values set in a
   `def` handler or `def` dependency are not visible to them.
