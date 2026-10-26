@@ -219,9 +219,10 @@ A handler cannot change the status once the body is being streamed (large downlo
 ## JSON configuration (Jackson 3, Boot 4)
 
 - Customize the mapper with a `JsonMapperBuilderCustomizer` bean (`org.springframework.boot.jackson.autoconfigure`).
-  The Jackson 2 `Jackson2ObjectMapperBuilderCustomizer` is **gone** from Boot 4.1, so old code does not compile.
+  The Jackson 2 `Jackson2ObjectMapperBuilderCustomizer` is not on the classpath of a Boot 4.1 project
+  unless the deprecated `spring-boot-jackson2` module is added, so old code does not compile by default.
 - Custom serializers registered as components use `@JacksonComponent` (`org.springframework.boot.jackson`);
-  `@JsonComponent` is removed as well.
+  `@JsonComponent` is likewise absent from the default classpath.
 - Prefer `spring.jackson.*` properties for simple settings. Remember that separate mappers (Kafka,
   HTTP clients) do not inherit them ([messaging-outbox](messaging-outbox.md#dependencies-and-boot-4-changes)).
 
@@ -287,7 +288,7 @@ For create/charge-style endpoints that clients retry:
 - Agent enables API versioning on an existing API without a default - unversioned clients get 400.
 - Agent returns SQL or driver messages in `detail` - log them; return a generic message.
 - Agent implements idempotency as check-then-insert - enforce it with a unique claim in the same transaction.
-- Agent uses `Jackson2ObjectMapperBuilderCustomizer` or `@JsonComponent` in Boot 4 - both are removed; use `JsonMapperBuilderCustomizer` / `@JacksonComponent`.
+- Agent uses `Jackson2ObjectMapperBuilderCustomizer` or `@JsonComponent` in Boot 4 - neither is on the classpath unless the deprecated `spring-boot-jackson2` module is added; use `JsonMapperBuilderCustomizer` / `@JacksonComponent`.
 
 ## Official sources
 

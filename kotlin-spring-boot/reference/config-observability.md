@@ -53,11 +53,11 @@ management:
   `loggers` allows runtime changes, and `env`/`configprops` reveal configuration (values are
   sanitized by default; do not turn that off). Keep them off the public network or behind
   authentication.
-- **Defining any `SecurityFilterChain` makes Boot's default actuator security back off.** Without a
-  custom chain, Boot permits `/actuator/health` and secures the rest; with one, the actuator paths
-  fall under your rules (for example `anyRequest().authenticated()` turns `/actuator/health` into
-  401 and breaks probes). Secure `/actuator/**` explicitly and permit the probe paths the platform
-  calls.
+- **Servlet stack: defining any `SecurityFilterChain` makes Boot's default actuator security back
+  off** (on WebFlux the same applies to a `SecurityWebFilterChain`, not run). Without a custom
+  chain, Boot permits `/actuator/health` and secures the rest; with one, the actuator paths fall
+  under your rules (for example `anyRequest().authenticated()` turns `/actuator/health` into 401 and
+  breaks probes). Secure `/actuator/**` explicitly and permit the probe paths the platform calls.
 - A separate management port (`management.server.port`) is network separation only if the network
   enforces it; it adds no authentication by itself.
 - **Liveness vs readiness:** liveness answers "should this process be restarted?", readiness answers

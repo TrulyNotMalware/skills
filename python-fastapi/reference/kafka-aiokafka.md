@@ -2,7 +2,7 @@
 
 Applies to aiokafka 0.14 against Kafka 4.x (KRaft). Kafka delivers at-least-once by default and
 loses messages silently whenever the client is used like a function call. Every statement below
-was observed against a three-broker cluster.
+was observed against a three-broker cluster, except those marked "from source".
 
 Contents: [Producer](#producer) · [Consumer](#consumer) ·
 [Publishing from a transaction](#publishing-from-a-transaction) · [Gotchas](#gotchas)
@@ -74,11 +74,11 @@ async def publish(request: Request, topic: str, key: str, value: dict[str, Any])
   with `min.insync.replicas=2` on the topic, plus `enable_idempotence=True`.
 - With `min.insync.replicas=2` and only the leader in sync, `acks="all"` sends failed with
   `NotEnoughReplicasError` after `request_timeout_ms` (40 s by default), and nothing was written.
-  With `enable_idempotence=True` the same sends raised nothing: aiokafka does not expire
-  idempotent batches and retries a retriable error such as `NotEnoughReplicasError` without end
-  (from source; non-retriable errors still fail the send), so `send_and_wait` waited until the
-  ISR recovered (59.5 s here) and then succeeded. Bound the wait in the caller, and treat a
-  timeout as "may still be delivered" (the timeout point above).
+  With `enable_idempotence=True` the same sends raised nothing: aiokafka does not expire idempotent
+  batches and retries a retriable error such as `NotEnoughReplicasError` without end (from source;
+  non-retriable errors still fail the send), so `send_and_wait` waited until the ISR recovered (59.5
+  s in one measurement) and then succeeded. Bound the wait in the caller, and treat a timeout
+  as "may still be delivered" (the timeout point above).
 - A serializer error (`TypeError: ... not JSON serializable`) is raised from `send`, before
   anything is queued.
 - Sending to a topic that does not exist **succeeds** when the brokers auto-create topics (the

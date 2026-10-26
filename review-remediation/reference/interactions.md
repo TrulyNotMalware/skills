@@ -21,7 +21,7 @@ Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-
   branch such as "resend when the row is still IN_PROGRESS".
 - **What happens:** the send succeeds, the status update fails (a database outage), the listener
   throws, the record is redelivered with the row still IN_PROGRESS, and the branch sends again.
-  In the incident one outage produced three sends.
+  In one case one outage produced three sends.
 - Before the change, with client auto-commit, this redelivery was not observed. Do not read that as
   "auto-commit is safe": auto-commit is also at-least-once as long as every record from a poll is
   processed before the next poll or close (the `KafkaConsumer` Javadoc's condition, kafka-clients
@@ -36,8 +36,8 @@ Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-
   sender stops retrying after a success, and nothing else recovers the work.
 - **What happens:** the first attempt fails late, the sender already has a success for the retry,
   and the event is lost.
-- **No remedy was recorded for this incident.** Forgetting failed attempts (a lesson from a
-  separate incident with a wrong dedup key) does not help here: once the in-flight duplicate got
+- **No remedy was recorded for this case.** Forgetting failed attempts (a lesson from a
+  separate case with a wrong dedup key) does not help here: once the in-flight duplicate got
   a success, the sender does not retry again. What to answer for a duplicate that arrives while
   the first attempt is in flight (success, an error, or a wait) depends on the sender's retry
   rules; decide it explicitly and test it.
@@ -58,19 +58,19 @@ Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-
 
 - **Condition:** on every request, an outer transaction holds a pooled connection while a
   `REQUIRES_NEW` inner transaction asks for another.
-- **What happens:** at pool-size concurrency each request waits for its second connection; in the
-  incident every such request timed out (10 of 10 reproductions).
+- **What happens:** at pool-size concurrency each request waits for its second connection; in one
+  case every such request timed out (10 of 10 reproductions).
 - **A bigger pool is not the fix:** the inner transaction can still commit while the outer one
-  rolls back. The incident moved the write after the outer commit.
+  rolls back. That case moved the write after the outer commit.
 
 ## Attempt counters reused as a budget
 
 - **Condition:** one counter serves both as an attempt or ownership marker and as the give-up
   budget, and it counts attempts that never sent anything (rate-limited, reclaimed from a queue).
-- **What happens:** sustained rate limiting alone (about 50 minutes of 429 responses in the
-  incident) made the code give up on healthy messages.
+- **What happens:** sustained rate limiting alone (about 50 minutes of 429 responses in one
+  case) made the code give up on healthy messages.
 - **Recorded remedy:** keep the ownership token and the send budget in separate fields.
-- **A second incident:** a claim token made of the attempt count alone collided after a manual
+- **A second case:** a claim token made of the attempt count alone collided after a manual
   requeue reset the count. A late finisher from an old claim matched a newer claim, gave its attempt back,
   and the newer claim's paid result was discarded (a review lane's probe). The token became the pair of
   attempt count and claim timestamp, pinned by a test that fails when the timestamp comparison is removed.
@@ -105,7 +105,7 @@ Contents: [Acknowledgement change + a resend branch](#acknowledgement-change--a-
     no such item, refund once and charge the next time.
   - Code defects (an unexpected exception): refund once, never probe, because every probe is another paid
     call that fails the same way.
-  - The incident kept the suspect marker as a prefix when an unrelated refund was stored, and counted
+  - That case kept the suspect marker as a prefix when an unrelated refund was stored, and counted
     requeues in a suffix that later failures carry over. Separate fields would be cleaner and were not
     built. Requeue became a manual step that skips jobs already requeued once.
   - Each rule is pinned by a test that fails when the rule is removed.

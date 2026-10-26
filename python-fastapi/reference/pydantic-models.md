@@ -226,6 +226,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Pool(BaseModel):
     size: int = 5
+    enabled: bool = False
 
 
 class Settings(BaseSettings):

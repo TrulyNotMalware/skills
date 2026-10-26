@@ -14,13 +14,23 @@ Contents: [Producing](#producing) · [Producer contexts](#producer-contexts) ·
 
 ## Producing
 
-`Producer` holds one client from `kgo.NewClient(kgo.SeedBrokers(brokers...),
-kgo.DefaultProduceTopic(topic))`; acks=all and idempotent writes are the defaults.
+`Producer` holds one client; acks=all and idempotent writes are the defaults. Without
+`RecordDeliveryTimeout` a record for an unreachable broker never completes (measured below), so the
+client sets one.
 
 ```go
 type Producer struct {
 	cl *kgo.Client
 	wg sync.WaitGroup // promises that have not run yet
+}
+
+func NewProducer(brokers []string, topic string) (*Producer, error) {
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.DefaultProduceTopic(topic),
+		kgo.RecordDeliveryTimeout(30*time.Second)) // the minimum is 1 s
+	if err != nil {
+		return nil, err
+	}
+	return &Producer{cl: cl}, nil
 }
 
 // PublishAsync buffers the record and returns. The record keeps the ctx it was produced
@@ -50,6 +60,10 @@ func (p *Producer) Close(ctx context.Context, timeout time.Duration) error {
 	return nil
 }
 ```
+
+`PublishAsync` suits work that outlives the request. In a request path that must not hang while
+the brokers are down, call `p.cl.TryProduce` instead: it fails at once with `kgo.ErrMaxBuffered`
+when the buffer is full.
 
 The synchronous `Publish` is `ProduceSync(ctx, &kgo.Record{Key: key, Value: value}).FirstErr()`:
 78–610 ms for the first call over 9 runs (median 98; metadata, producer ID), 6–11 ms after. Give

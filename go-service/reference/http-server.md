@@ -1,6 +1,6 @@
 # HTTP server: routes, handlers and responses
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, chi v5.3.2, gin v1.12.0
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, chi v5.3.2, gin v1.12.0
 and echo v4.16.0 unless a rule carries a version tag; run over HTTP/1.1 on loopback (darwin/arm64).
 The mux, `ResponseWriter` and the file servers answer most mistakes with a well-formed response (a
 200 from a catch-all, a sniffed `text/html`, a dropped header, a file from outside the directory)
@@ -32,9 +32,11 @@ func newHandler(logger *slog.Logger) http.Handler {
 ```
 
 Handlers use [`decodeJSON`](#decoding-request-bodies) and [`writeError`](#writing-responses);
-`accessLog` sits directly outside the mux; `Recover` is in [lifecycle-deploy](lifecycle-deploy.md).
-The rules below need a main `go` line ≥1.22 and no `GODEBUG=httpmuxgo121=1` (go-style skill,
-versions-tools). None is reported by any tool; build the real mux in tests.
+`accessLog` sits outside `Recover`, which wraps the mux and forwards the same `*Request`, so nothing
+between `accessLog` and the mux replaces it; `Recover` is in
+[lifecycle-deploy](lifecycle-deploy.md). The rules below need a main `go` line ≥1.22 and no
+`GODEBUG=httpmuxgo121=1` (go-style skill, versions-tools). None is reported by any tool; build the
+real mux in tests.
 
 - **The most specific pattern wins, whatever the order**: with `/items/`, `/items/{id}`,
   `/items/special`, `/items/7` → `{id}`, `/items/special` → the literal, `/items/7/x` → `/items/`.
@@ -242,7 +244,7 @@ alone logged a 101 as 200. None of these is reported by any tool.
 
   | between the middleware and the mux | `r.Pattern` after `next` |
   |---|---|
-  | nothing | `GET /items/{id}`; `/dir/` for its redirect; `/` for a catch-all; "" for 404 and 405 |
+  | nothing (a `Recover` that forwards the same `*Request` counts as nothing) | `GET /items/{id}`; `/dir/` for its redirect; `/` for a catch-all; "" for 404 and 405 |
   | `r.WithContext(…)`, `http.StripPrefix`, `http.TimeoutHandler` | "" |
   | a top mux sending `/api/` to an inner mux | `/api/` through `StripPrefix`; `GET /api/users/{id}` without |
 

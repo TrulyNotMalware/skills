@@ -1,6 +1,6 @@
 # PostgreSQL with pgx
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, pgx v5.11.0
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, pgx v5.11.0
 (`pgx`, `pgxpool`, `pgconn`, `pgtype`, `stdlib`) and golangci-lint v2.14 unless a rule carries a
 version tag. Every server behaviour below was measured against PostgreSQL 17.11 from darwin/arm64
 (`runtime.NumCPU()` 8); "(docs)" and "(source)" mark what was read, not run. What all
@@ -344,7 +344,7 @@ twice more on each connection:
 - Agent scans `numeric` into `float64` - digits are lost without an error.
 - Agent scans `text[]` or `jsonb` through database/sql and tests on go1.27 only - a go1.26 build fails at run time; for jsonb `SQLScanner` also needs the pointer type registered (`&doc`, not `Doc{}`).
 - Agent runs `ALTER TABLE` under a warmed pool - each connection fails once with 0A000.
-- Agent keeps the default exec mode behind PgBouncer without `max_prepared_statements` - pgx's doc requires `QueryExecModeExec`.
+- Agent keeps the default cached-statement mode behind PgBouncer transaction or statement pooling - use `exec` or `simple_protocol` (also `cache_describe`), unless PgBouncer ≥1.21 has `max_prepared_statements` > 0.
 
 ## Official sources
 

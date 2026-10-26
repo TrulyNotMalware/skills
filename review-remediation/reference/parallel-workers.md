@@ -10,18 +10,18 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
 ## Before spawning
 
 - **Fix the base commit and each worker's file ownership.**
-- **Do not assume a harness-created worktree starts from your branch.** In the incident the
+- **Do not assume a harness-created worktree starts from your branch.** In one run the
   isolated worktrees were created from the default branch, so every cited file and line was off.
   Either create the worktrees yourself at the base commit, or make each worker's first action a
   `git rev-parse HEAD` compared with the base, and have it stop (not rebase) on mismatch.
 - If the base cannot be fixed, run the workers in the main working tree with disjoint file
-  ownership. That is what was done in the incident, and it then needed the build rules below.
+  ownership. That is what was done in one run, and it then needed the build rules below.
 - **Do not run on a worker's behalf a command the permission system denied the worker.** In the
-  incident two workers had the git command that moves their base denied and stopped; re-plan the
+  run two workers had the git command that moves their base denied and stopped; re-plan the
   split instead of executing the denied command from the coordinator.
-- **The brief fixes where revert checks run, and the coordinator keeps that true.** "Reverting in
-  place is fine" holds only while nothing else reads the tree. In one run the coordinator wrote
-  that in a worker's brief and then started a code-review lane and a verifier on the same tree
+- **The brief fixes where revert checks run, and the coordinator keeps that true.** Revert only
+  in a copy of the tree, never in place. In one run the coordinator wrote "Reverting in place is
+  fine" in a worker's brief and then started a code-review lane and a verifier on the same tree
   before the worker reached its revert loop; the worker moved to a scratch copy on its own, so
   nothing broke, but the brief had been false since the lanes started and the worker had no way
   to know. Put the copy procedure (below) in the brief, and if you start any reader after
@@ -47,7 +47,7 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
   done: it is stale from the next edit in the main tree. (Six behavioural fixes on one pull request were
   verified this way while a code-review lane read the main tree.)
 - **The same holds for one agent, and for a tree that is not a repository.** Anything that reads the tree
-  while a fix is reverted is a concurrent reader. In the incident a background `test && build` chain started
+  while a fix is reverted is a concurrent reader. In one run a background `test && build` chain started
   next to an in-place revert loop reported the reverted file as a failing test and went on to build an image;
   the image then had to be compared with the sources file by file (it matched). Without git, copy the tree and
   loop there: `rsync -a --exclude .venv --exclude __pycache__ --exclude .env <tree>/ <copy>/`, then run the
@@ -62,7 +62,7 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
   in the same second as the cached original makes the reverted run execute the original, and the check
   reports that the test pins nothing. `-B` on the reverted run avoids only the first case (it stops writing
   bytecode, not reading it); a copy of the tree with its own caches avoids both. (Reproduced on Python
-  3.14.7 with fixed mtimes; in the incident a same-size revert that swapped two blocks, restored after a
+  3.14.7 with fixed mtimes; in one run a same-size revert that swapped two blocks, restored after a
   sub-second test run, made the next full run fail until `__pycache__` was removed.)
 - **Verification that shares mutable state runs in sequence or is isolated.** Parallel probes
   sharing one flag file all broke; agents sharing one database used a table prefix each. Tests
@@ -71,12 +71,16 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
 
 ## Reports and patches
 
-- **Reports go to files, in a durable place.** Long worker messages are truncated, so ask for a
-  file path back, and ask for "problems only, short, most important first". Keep results in the
-  repository, an artifacts directory or notes rather than only under `/tmp`: a reboot once erased
-  the scratch results and the unread rest of truncated reports.
+- **Reports go to files, in a durable place (headless or CLI lanes).** Long worker messages are
+  truncated, so ask for a file path back, and ask for "problems only, short, most important
+  first". Keep results in the repository, an artifacts directory or notes rather than only under
+  `/tmp`: a reboot once erased the scratch results and the unread rest of truncated reports.
   Put the file request in the brief, before the first report: in one run four reports were
   truncated before the coordinator switched to files.
+- **Fallback when the harness refuses report files from subagents.** Some harnesses reject a
+  subagent's report-file write ("Subagents should return findings as text"). Then ask the worker
+  for a short text report (problems only, most important first) and save it to a file yourself
+  on receipt. Writes of working copies and scripts were still allowed in that case.
 - **Screen patches before applying them.** `git apply --numstat <patch>` lists the files a patch
   touches without applying it; reject anything outside the worker's ownership. Conflicts land in
   shared documents (`AGENTS.md`, changelogs); merge those by hand.
@@ -99,5 +103,7 @@ Contents: [Before spawning](#before-spawning) · [While they run](#while-they-ru
 - Agent runs verification scripts that share a flag file or the same tables in parallel - the
   results corrupt each other.
 - Agent leaves worker reports only in `/tmp` - a reboot loses them.
+- Agent insists on a report file from a subagent whose harness refuses the write - the report is
+  lost or the lane stalls. Take a short text report and save it yourself on receipt.
 - Agent writes "revert in place is fine" in a worker's brief and then starts a review lane - the
-  brief was true when written, and the worker cannot see that it changed.
+  brief was true when written, and the worker cannot see that it changed. Revert only in a copy.

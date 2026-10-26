@@ -30,7 +30,7 @@ Version-bound statements are tagged `(Python 3.14)`, `(ruff 0.16)`, `(mypy 2.3)`
 
 | Component | Baseline | Notes |
 |---|---|---|
-| Python | 3.14 | Lazy annotations (PEP 649); inline type parameters (PEP 695); `except A, B:` without parentheses |
+| Python | 3.14 | Lazy annotations (PEP 649); `except A, B:` without parentheses; inline type parameters (PEP 695) are since 3.12 |
 | ruff | 0.16 | Linter and formatter; `B909` and `PLW1514` are still preview rules |
 | mypy | 2.3 | `strict = true`; no implicit `Optional` |
 | pytest | 9.1 | The testing reference; `unittest.mock` from the standard library |
@@ -73,7 +73,8 @@ interpreter that actually runs the code.
 - Timezone-aware datetimes, `Decimal` or integer minor units for money, `encoding="utf-8"` on
   every text file.
 - `logging` with lazy arguments, not `print` or f-strings in log calls. No work at import time.
-- Boolean flags are keyword-only parameters.
+- Boolean flags are keyword-only parameters, in functions you design; leave existing public
+  signatures alone.
 
 ## Reference routing
 

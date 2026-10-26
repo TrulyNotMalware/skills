@@ -1,6 +1,6 @@
 # Testing services
 
-Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26 or later, go-cmp v0.7.0,
+Applies to the Go 1.27.1 toolchain with a go.mod `go` line of 1.26.0 or later, go-cmp v0.7.0,
 goleak v1.3.0, testcontainers-go v0.44.0 and modernc.org/sqlite v1.60.1 unless a rule carries a
 version tag (tags and Reported-by labels as in the go-style skill, versions-tools). A recorder
 test passes on a handler the real server answers differently, a JSON test fails on formatting and
@@ -44,6 +44,7 @@ func do(t *testing.T, srv *httptest.Server, method, path string) (int, http.Head
 }
 
 func TestGetItem(t *testing.T) {
+	// NewRoutes, NewHandler, NewStore, Item and Hits are the app's own types, elided here.
 	routes := NewRoutes()
 	srv := newServer(t, NewHandler(NewStore(Item{ID: 7, Name: "lamp"}), routes))
 

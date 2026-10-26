@@ -110,7 +110,8 @@ def first[T](items: list[T]) -> T:
 - `X | None`, not `Optional[X]`; `list[int]`, not `typing.List[int]`; `Callable`, `Iterator`,
   `Sequence`, `Mapping` from `collections.abc`, not from `typing`. ruff `UP006`, `UP035`, `UP045`
   flag the old forms.
-- Type parameters are declared inline (Python 3.12+), as in `first`, `Node` and `Pair` above. ruff `UP047` flags a module-level `TypeVar` used for a generic function.
+- Type parameters are declared inline (Python 3.12+), as in `first`, `Node` and `Pair` above. ruff
+  `UP047` flags a module-level `TypeVar` used for a generic function.
 - A default of `None` needs `| None` in the annotation. `def f(x: int = None)` is an error in
   mypy 2.3; there is no implicit `Optional`.
 - **Annotations are evaluated lazily on Python 3.14.** A class can be named in an annotation
@@ -151,8 +152,9 @@ runtime-evaluated-decorators = ["pydantic.dataclasses.dataclass"]
 - **`Any` switches checking off for everything it touches.** `def f(x: Any) -> None:
   x.whatever().more()` passes, also under `strict`; `strict` only objects when the `Any` is
   returned from a function with a concrete return type (`no-any-return`). When the type is
-  unknown, write `object`: every use then needs an `isinstance` check first. Reserve `Any` for real boundaries (`json.loads` results, untyped
-  libraries) and convert to a typed value right there.
+  unknown, write `object`: every use then needs an `isinstance` check first. Reserve `Any` for
+  real boundaries (`json.loads` results, untyped libraries) and convert to a typed value right
+  there.
 - **`str` is a `Sequence[str]` and an `Iterable[str]`.** `def tags(xs: Sequence[str])` accepts
   `tags("abc")` without complaint and iterates over the characters. Where that would be a bug,
   take `list[str]` or reject `str` explicitly.
@@ -214,7 +216,7 @@ class Status(enum.StrEnum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class User:
-    id: UserId
+    user_id: UserId
     name: str
     status: Status = Status.ACTIVE
 

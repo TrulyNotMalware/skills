@@ -114,7 +114,9 @@ Check which approach the project already uses before adding a new one.
 |---|---|
 | `REQUIRED` (default) | Almost everything |
 | `REQUIRES_NEW` | A record that must survive the caller's rollback (for example a failed-attempt log) |
-| `MANDATORY` | Methods that must never start their own transaction (guards against misuse) |
+| `MANDATORY` | Methods that must be called inside an existing transaction; it throws without one (guards against misuse) |
+| `SUPPORTS` | Code that joins a caller's transaction if one exists and otherwise runs non-transactionally |
+| `NEVER` | Code that runs non-transactionally and throws if a transaction exists |
 | `NOT_SUPPORTED` | Long non-transactional work called from a transactional context |
 
 `REQUIRES_NEW` suspends the outer transaction **while keeping its connection**. Each request then
@@ -216,12 +218,12 @@ class OrderNotifications(private val mailer: Mailer) {
   `readOnly` no longer reaches the JDBC connection (from source). Do not use it as the fix.
 - Without an active transaction the listener is skipped by default (`fallbackExecution = false`).
 - **`@TransactionalEventListener` is transactional only where a `TransactionalEventListenerFactory`
-  is registered.** Boot's transaction auto-configuration (`@EnableTransactionManagement`) does that; a
-  hand-built `AnnotationConfigApplicationContext` with `registerBean` does not, and the annotated
+  is registered.** Boot's transaction auto-configuration (`@EnableTransactionManagement`) does that;
+  a hand-built `AnnotationConfigApplicationContext` with `registerBean` does not, and the annotated
   method then runs as a plain `@EventListener`: at publish time, inside the publishing transaction,
-  and also when that transaction rolls back (Framework 7.0.9, observed in a spec that first passed
-  for the wrong reason). Register the factory, or import `@EnableTransactionManagement`, before
-  asserting after-commit behaviour there; see [testing](testing.md#transactions-time-and-concurrency-in-tests).
+  and also when that transaction rolls back (Framework 7.0.9). Register the factory, or import
+  `@EnableTransactionManagement`, before asserting after-commit behaviour there; see
+  [testing](testing.md#transactions-time-and-concurrency-in-tests).
 - An application-wide asynchronous `ApplicationEventMulticaster` (one given a task executor) makes
   every plain `@EventListener` run on the executor, outside the publisher's transaction.
   `@TransactionalEventListener`s are still invoked on the publishing thread (Framework 6.1+); `@Async`

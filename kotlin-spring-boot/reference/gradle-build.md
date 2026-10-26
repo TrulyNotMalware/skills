@@ -2,7 +2,8 @@
 
 Multi-module Gradle builds with the Kotlin DSL (Gradle 9.x, Kotlin 2.4, Boot 4.1). Plugin and flag
 basics are in [kotlin-spring-basics](kotlin-spring-basics.md#build-setup-gradle-kotlin-dsl).
-Raising versions (what to bump, how to verify, Dependabot) is not covered here.
+Raising versions (what to bump, how to verify) is not covered here; Dependabot appears only as a
+constraint on how versions are declared.
 
 Contents: [Know who owns each version](#know-who-owns-each-version) ·
 [Importing the Spring Boot BOM](#importing-the-spring-boot-bom) ·
@@ -64,7 +65,7 @@ Two mechanisms, with different override rules. Check which one the build uses.
 
 ## Multi-module structure
 
-```
+```text
 settings.gradle.kts          // include("domain", "application", "infrastructure"), foojay toolchain resolver
 build.gradle.kts             // plugin versions (apply false) + shared conventions
 domain/                      // pure Kotlin, no Spring
@@ -159,16 +160,16 @@ kotlin {
   25) the failure does not occur, since `sun.jnu.encoding` stays `UTF-8` under `POSIX`, and the same
   daemon was reused for every locale. If a rerun still fails, `./gradlew --stop` first.
 
-- Run verification builds with warnings visible:
-  `./gradlew build --warning-mode all --console=plain`. Without `--warning-mode all`, Gradle prints
-  only a one-line "Deprecated Gradle features were used" summary, and `-q` hides even that, so "no
-  warnings" from a quiet build is not evidence. (Kotlin compiler diagnostics for build scripts are a
-  separate channel and can be hard errors regardless of warning mode.) The flag has a cost for
-  Kotlin sources: Gradle 9.7.1 with Kotlin 2.4.10 then renders compiler warnings as "Problem found"
-  blocks and showed only the first 15 of a task's warnings (15 of 20, 15 of 23) without a notice,
-  while the default output listed every `w:` line. Read Kotlin warnings from a run without the flag
-  that actually compiles: an UP-TO-DATE `compileKotlin` prints none, so add `--rerun-tasks` (or run
-  after `clean`).
+- Run verification builds with warnings visible, as two runs: `./gradlew build --console=plain` for
+  Kotlin `w:` lines and `./gradlew build --warning-mode all --console=plain` for Gradle
+  deprecations. Without `--warning-mode all`, Gradle prints only a one-line "Deprecated Gradle
+  features were used" summary, and `-q` hides even that, so "no warnings" from a quiet build is not
+  evidence. (Kotlin compiler diagnostics for build scripts are a separate channel and can be hard
+  errors regardless of warning mode.) The flag has a cost for Kotlin sources: Gradle 9.7.1 with
+  Kotlin 2.4.10 then renders compiler warnings as "Problem found" blocks and showed only the first
+  15 of a task's warnings (15 of 20, 15 of 23) without a notice, while the default output listed
+  every `w:` line. Read Kotlin warnings from a run without the flag that actually compiles: an
+  UP-TO-DATE `compileKotlin` prints none, so add `--rerun-tasks` (or run after `clean`).
 - Deprecated Kotlin DSL forms to avoid in new code (Gradle 9.7.0 warns about all three, "scheduled to
   be removed in Gradle 10"; 9.5.1 is silent): `val x: String by extra`, `val x by extra("1.2.3")` and
   `val t by tasks.getting`. Use `extra["x"] as String` and `tasks.named<T>("x") { }`. If Dependabot

@@ -8,7 +8,7 @@ Contents: [Build setup (Gradle Kotlin DSL)](#build-setup-gradle-kotlin-dsl) ·
 [Configuration properties](#configuration-properties) ·
 [Annotation use-site targets](#annotation-use-site-targets) · [JSON (Jackson 3)](#json-jackson-3) ·
 [Spring's Kotlin extensions](#springs-kotlin-extensions) · [Logging](#logging) ·
-[Checklist](#checklist)
+[Checklist](#checklist) · [Gotchas](#gotchas)
 
 ## Build setup (Gradle Kotlin DSL)
 
@@ -303,3 +303,15 @@ Spring MVC honours Kotlin default values for optional handler parameters
 - [ ] Validation/Jackson annotations reach the field (Kotlin 2.4+, the flag on 2.2–2.3, or `@field:`)
 - [ ] Properties classes registered, validated, with secret-safe `toString()`
 - [ ] Required secret placeholders cannot bind as literal `${...}` strings
+
+## Gotchas
+
+- Agent gives a constructor parameter a default (`clock: Clock = Clock.systemUTC()`) to pick a bean - Spring injects an existing bean and silently ignores the default; use a qualifier or a dedicated type.
+- Agent makes a required constructor dependency nullable or wraps it in `ObjectProvider` to get past a startup failure - the missing bean surfaces later or never; find out why it is missing.
+- Agent trusts the binder to fail on `bot-token: ${SLACK_TOKEN}` when the variable is unset - `@ConfigurationProperties` binds the literal `${SLACK_TOKEN}` string (`@Value` fails fast); reject the literal with a constraint or an `init` check.
+- Agent uses a non-null `String` property to require a value - `""` binds fine; add `@field:NotBlank`.
+- Agent leaves the generated data-class `toString()` on a properties class that holds secrets - it prints every field into logs and error messages; override it or keep secrets out.
+- Agent writes `@NotBlank` or `@Valid` on a constructor property below Kotlin 2.4 without `-Xannotation-default-target=param-property` - the annotation lands on the parameter only and Bean Validation ignores it; write `@field:` explicitly.
+- Agent marks a nested properties class without `@Valid` - its constraints are never checked, even when the nested object comes from its default value.
+- Agent puts transactional or cached work in a constructor, `init` block, or `@PostConstruct` - it runs on the raw target without proxy advice; use an `ApplicationReadyEvent` listener or an explicit call.
+- Agent names a file-level logger `logger` in a class extending `ResponseEntityExceptionHandler` - the inherited `protected val logger` shadows it; use `log`.

@@ -17,7 +17,9 @@ Contents: [Naming](#naming) Â· [Functions and classes](#functions-and-classes) Â
 | constant | `UPPER_SNAKE` | `MAX_RETRIES` |
 | internal to a module or class | leading underscore | `_normalize`, `self._cache` |
 
-- Exception classes end in `Error`. ruff `N818`; `N801`-`N806` cover the rest of the table.
+- Exception classes end in `Error`. ruff `N818`. Classes, functions, arguments and local variables
+  are covered by `N801`-`N806`, module names by `N999`; no ruff rule checks `UPPER_SNAKE`
+  constants, so that row is a review item.
 - Name things for what they are in the domain, not for their type: `users`, not `user_list`;
   `is_active`, `has_items`, `can_retry` for booleans.
 - **Do not shadow builtins**: `id`, `type`, `list`, `dict`, `input`, `filter`, `format`, `hash`,
@@ -26,7 +28,8 @@ Contents: [Naming](#naming) Â· [Functions and classes](#functions-and-classes) Â
   `logging.py`, `queue.py`). Other imports of that name then get your file: `AttributeError:
   module 'random' has no attribute 'randint'` (on Python 3.14 the message suggests renaming the
   file). Modules the interpreter has already loaded at startup, such as `types`, are not
-  affected at runtime, but the name is still confusing. ruff `A005` reports all of them.
+  affected at runtime, but the name is still confusing. ruff `A005` reports the standard-library
+  names; nothing reports a dependency name.
 - A name with a leading underscore is private to its module or class. Do not import or call it
   from elsewhere, and do not use double leading underscores (name mangling) for privacy.
 
@@ -184,7 +187,8 @@ def parse_amount(order_id: int, raw: str) -> int:
 - Pass arguments, do not format: `logger.info("user %s", user)`. An f-string is formatted even
   when the level is disabled. ruff `G004`.
 - Inside `except`, `logger.exception(...)` records the traceback; `logger.error(...)` does not.
-  ruff `TRY400`. Log an exception or re-raise it, not both at every level.
+  ruff `TRY400`. Log an exception or re-raise it, not both at every level; the example above logs
+  and re-raises only because it is the one boundary that logs, so its callers must not log again.
 - A stdlib logger takes no arbitrary keyword arguments. `logger.error("failed", error=str(e))`
   (structlog style, as popular guides write it) raises `TypeError` inside the `except` block, and
   the caller gets that instead of the exception you meant to raise. Use format arguments or

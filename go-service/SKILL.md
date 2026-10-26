@@ -73,9 +73,10 @@ go.mod, lint config and root `AGENTS.md`/`CLAUDE.md` win over this table.
   exceed `MaxIdleConns`. Clone `DefaultTransport`, set a timeout
   (`Client.Timeout`, or `ResponseHeaderTimeout` plus a per-call deadline for streams and
   downloads); always close the body, check the status code, and bound how much you read.
-- **Pass the request's context to every call that can block** (database, HTTP, Redis, Kafka);
-  use `context.WithoutCancel` plus a timeout for work that must finish after the request or signal.
-  A franz-go `Produce` record outlives the call: detach its ctx, and in a request path use
+- **Pass the request's context to every call that can block** (database, HTTP, Redis, Kafka); Redis
+  only interrupts a blocked call on ctx with `ContextTimeoutEnabled` (reference/redis.md); use
+  `context.WithoutCancel` plus a timeout for work that must finish after the request or signal. A
+  franz-go `Produce` record outlives the call: detach its ctx, and in a request path use
   `TryProduce` and set `RecordDeliveryTimeout`, since a detached `Produce` blocks while the buffer
   is full and the brokers are down.
 - **Bound and check every request body**: `http.MaxBytesReader`, a second `Decode` that must hit
@@ -99,7 +100,7 @@ go.mod, lint config and root `AGENTS.md`/`CLAUDE.md` win over this table.
 
 ## House defaults
 
-The skill author's choices where several approaches are common. Follow the codebase when it has
+Defaults this skill uses where several approaches are common. Follow the codebase when it has
 one.
 
 - **Routing**: `net/http` `ServeMux` with method patterns; chi when a project needs route groups
