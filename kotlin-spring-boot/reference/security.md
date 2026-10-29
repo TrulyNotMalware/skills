@@ -339,7 +339,9 @@ mockMvc.get("/api/orders/1") {
   or the slice tests Boot's defaults instead of your rules ([testing](testing.md#web-layer-webmvctest)).
 - Cover per protected endpoint: no token (401), wrong authority (403), right authority (2xx), and for
   ownership rules another user's resource (403 or 404, as designed).
-- Signature filters: valid signature, tampered body, stale timestamp, replayed request, a provider
+- Signature filters: the expected signatures in the spec come from an independent tool, not from
+  the production signer ([testing](testing.md#tests-that-lock-in-bugs)). Cover a valid signature,
+  tampered body, stale timestamp, replayed request, a provider
   retry of a request already processed (deduplicated whatever timestamp it carries), an oversized
   body (rejected without reading it all), percent-encoded and
   `;`-parameter variants of the webhook path, and for form-encoded webhooks an added query parameter.

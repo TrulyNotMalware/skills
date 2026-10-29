@@ -364,6 +364,23 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
   `AFTER_COMMIT` listeners (they never run), and anything that happens only at commit (for example a
   forced version increment scheduled for commit). To test those, commit for real
   (`TransactionTemplate` per step, no test-level `@Transactional`) and clean up explicitly.
+- **Committed state must not leak between specs.** A spec that commits rows (`TransactionTemplate`
+  per step, a second thread) leaves them behind for whichever spec runs next, so the failure moves
+  with test order. Sharing happens through the database name: an in-memory URL such as
+  `jdbc:h2:mem:app;DB_CLOSE_DELAY=-1` names one database for every context in the same JVM and class
+  loader that uses it (`DB_CLOSE_DELAY=-1` only keeps it alive after the last connection closes),
+  and a Boot-generated name (`spring.datasource.generate-unique-name`, the default) separates
+  contexts, not the specs that reuse one cached context. Give each committing spec its own database
+  (`jdbc:h2:mem:<spec-name>;DB_CLOSE_DELAY=-1` on H2, a per-spec schema or container otherwise).
+  Truncating in `afterSpec` is enough only when specs run sequentially, background writers have
+  stopped, and the cleanup restores the baseline the other specs expect; with Kotest's concurrent
+  specs it is not. In `@DataJpaTest` a literal `spring.datasource.url` from test properties is
+  replaced by the embedded database unless the spec also carries
+  `@AutoConfigureTestDatabase(replace = NONE)` (`NON_TEST`, the default, keeps only datasources Boot
+  recognizes as test-owned, such as
+  one from `@DynamicPropertySource` or `@ServiceConnection`). A different literal test property is a
+  different context cache key, so the committing spec starts its own context; a value that changes
+  only inside a dynamic supplier does not.
 - Flush-time behavior is testable inside the test transaction, **if you flush**: ordinary `@Version`
   increments, immediate constraint violations, and generated SQL all happen at flush. Without a
   flush, the rollback discards them before they reach the database. Use `saveAndFlush` or
@@ -391,6 +408,25 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
 - **Concurrency:** give each thread its own transaction (`TransactionTemplate` inside the task).
   Assert that `latch.await(timeout, unit)` returned `true`. A timed-out wait silently turns a race
   test into a sequential one that still passes.
+- **Lock-order and blocking tests** (pessimistic locks: `FOR UPDATE`, `@Lock(PESSIMISTIC_WRITE)`,
+  advisory locks, a documented lock order): run holder and waiter on their own threads, connections,
+  and transactions. The holder signals `holderReady` right after acquiring the lock and then waits
+  on `release` inside its transaction; the test thread awaits `holderReady` (bounded) before
+  starting the waiter; the waiter signals `waiterStarted` immediately before its locking statement
+  and the test thread awaits that too; then the test asserts that the waiter is *still blocked*
+  after a bounded wait (`waiterFinished.await(500, TimeUnit.MILLISECONDS) shouldBe false`), counts
+  `release` down, and asserts `waiterFinished.await(...)` is `true`. Capture each worker's exception
+  in a concurrent queue and its result in an `AtomicReference`; after bounded joins (with `release`
+  counted down in a `finally` first) assert that the queue is empty and both results are present,
+  because a latch that was counted down says only that the thread ended, not that it succeeded, and
+  `holderReady` counted down on failure no longer means the lock was taken. Keep probe and hold
+  below the database's lock wait timeout (H2 `LOCK_TIMEOUT`, MariaDB `innodb_lock_wait_timeout`), or
+  the waiter fails with a timeout error instead of staying blocked. The timed probe is
+  scheduler-sensitive: a fixed sleep before the assertion cannot tell a blocked waiter from a slow
+  one, and the bounded wait is evidence rather than proof. Run the spec once with the lock removed
+  and keep it only if it fails there. The protocol shows that the waiter blocks on the holder; an
+  acquisition *order* across several locks needs its own instrumentation (record the sequence and
+  assert it).
 - **Async:** wait for conditions, not durations. Use Kotest `eventually(5.seconds) { ... }`
   (`io.kotest.assertions.nondeterministic.eventually`, in `kotest-assertions-core`) or Awaitility.
   Never `Thread.sleep`.
@@ -458,6 +494,26 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
   so an ordering test built on fixture `createdAt` values orders by insert time and may pass by
   accident. Set such columns from an injected `Clock` in production code instead of
   `@CreationTimestamp`, or check the stored values.
+- **A deterministic MAC or hash check needs an expected value computed outside the code under test**
+  (HMAC webhook signatures, content digests, idempotency hashes). A spec that calls the production
+  signer to build the expected header proves only that verification agrees with signing; a wrong
+  canonicalization (decoded instead of raw body, re-serialized JSON, the platform charset) sits in
+  both and passes. Embed known-answer vectors produced by another tool and check that two tools
+  agree on the same UTF-8 bytes before they go into the spec:
+
+  ```sh
+  printf '%s' 'v0:1714280000:token=abc&text=hi' | openssl dgst -sha256 -hmac 'secret' | awk '{print $NF}'
+  python3 -c 'import hmac, hashlib; print(hmac.new(b"secret", b"v0:1714280000:token=abc&text=hi", hashlib.sha256).hexdigest())'
+  printf '%s' 'v0:1714280000:{"text":"café"}' | openssl dgst -sha256 -hmac 'secret' | awk '{print $NF}'
+  python3 -c 'import hmac, hashlib; print(hmac.new(b"secret", "v0:1714280000:{\"text\":\"café\"}".encode(), hashlib.sha256).hexdigest())'
+  ```
+
+  Include one body with non-ASCII characters, as in the second pair, so the byte encoding is part of
+  the vector (`printf` sends the script's UTF-8 bytes; a Python `b"..."` literal is bytes and
+  `.encode()` is UTF-8; the spec must sign the same bytes). Round-trip and property tests still earn
+  their place next to the vectors (one changed byte in the body or timestamp must fail). A scheme
+  with randomized signing (RSA-PSS, ECDSA without deterministic nonces) does not produce identical
+  signatures across tools; compare those by verifying, not by equality.
 
 ## Gotchas
 
@@ -496,6 +552,16 @@ class OrderRepositoryPostgresTest : BehaviorSpec({ /* ... */ })
   flag is never set; use a real manager through the real caller.
 - Agent tests a `@TransactionalEventListener` in a hand-built context without
   `TransactionalEventListenerFactory` - it runs as a plain listener, inside the transaction.
+- Agent builds a MAC or digest test's expected value by calling the production signer - signing and
+  verification share any canonicalization bug; use a known-answer vector from another tool, with one
+  non-ASCII body.
+- Agent proves lock ordering with a fixed sleep before the assertion - it cannot tell a blocked
+  waiter from a slow one, and a long enough sleep passes with no lock; park the holder on a latch,
+  probe with a bounded wait, check the workers' failures, and keep the spec only if it fails with
+  the lock removed.
+- Agent commits rows from a spec that shares its database with other specs - they leak into later or
+  concurrent specs; give committing specs their own database URL (plus `replace = NONE` in a slice)
+  and truncate only when specs run sequentially.
 
 ## Official sources
 
